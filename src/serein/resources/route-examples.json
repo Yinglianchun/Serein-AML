@@ -1,0 +1,193 @@
+{
+  "generation": "public-synthetic-v2",
+  "provenance": {
+    "adaptation": "Independently authored fictional examples; no personal conversations or event drafts. Route roles and thresholds retained; changed examples require re-embedding and do not imply equivalent routing accuracy."
+  },
+  "policy": {
+    "min_score": 0.72,
+    "min_margin": 0.06,
+    "aggregation_top_k": 1,
+    "boundary_veto_min_score": 0.62,
+    "boundary_veto_max_deficit": 0.03,
+    "boundary_veto_enabled": true
+  },
+  "routes": [
+    {
+      "name": "simple_contact",
+      "label": "陪伴与贴近",
+      "action": "skip",
+      "enabled": false,
+      "threshold": null,
+      "examples": []
+    },
+    {
+      "name": "present_chitchat",
+      "label": "此刻闲聊",
+      "action": "skip",
+      "enabled": true,
+      "threshold": 0.6,
+      "examples": [
+        "{ai_name}，下午好呀。",
+        "来跟你打个招呼。",
+        "今天想随便聊几句。",
+        "给你送一朵想象中的小花。",
+        "陪我发一会儿呆吧。",
+        "听见一个笑话，忍不住笑了。",
+        "现在不用找资料，聊聊天就好。",
+        "想听你讲个轻松的小故事。",
+        "送你一个隔空拥抱。",
+        "给今天画个开心的句号。",
+        "刚路过这里，来问声好。",
+        "想和你玩一句接一句的小游戏。",
+        "你愿意陪我数云朵吗？",
+        "今天的问候是一声喵。",
+        "来击个掌！",
+        "没有特别的话题，就是来坐坐。",
+        "用一句话形容此刻吧。",
+        "一起给窗外的云起个名字。",
+        "我给你比个小小的心。",
+        "请收下这份下午茶。",
+        "今天也想听听你的声音。",
+        "随便哼一句歌吧。",
+        "暂时没有问题要问。",
+        "先陪我安静待一会儿。",
+        "把这句问好放在今天的开头。",
+        "我们来聊点不费脑子的事。"
+      ]
+    },
+    {
+      "name": "present_reality",
+      "label": "当前状态与感受",
+      "action": "skip",
+      "enabled": true,
+      "threshold": 0.6,
+      "examples": [
+        "窗边的光刚好照到桌角。",
+        "我正在等一壶水烧开。",
+        "刚把书桌收拾整齐。",
+        "今天走路走得有点腿酸。",
+        "此刻闻到了烤面包的香味。",
+        "手边的茶已经凉了。",
+        "刚戴上新洗好的围巾。",
+        "现在肚子有一点饿。",
+        "我正在阳台给绿植浇水。",
+        "刚坐下，想歇几分钟。",
+        "眼睛有点干，准备休息一下。",
+        "外面的风把窗帘吹起来了。",
+        "今天精神挺足的。",
+        "现在有点紧张，想缓一缓。",
+        "刚把忘在椅子上的外套收起来。",
+        "我这会儿正在排队。",
+        "眼前这片夕阳很好看。"
+      ]
+    },
+    {
+      "name": "intimate_contact",
+      "label": "亲密联系",
+      "action": "skip",
+      "enabled": true,
+      "threshold": null,
+      "examples": [
+        "我现在想和你亲热一会儿，先把别的事放在一边吧。"
+      ]
+    },
+    {
+      "name": "recall_needed",
+      "label": "明确回望",
+      "action": "recall",
+      "enabled": true,
+      "threshold": null,
+      "examples": [
+        "上回我们给那份图书馆计划定了哪一天？",
+        "之前挑选地图集时，我们最后选的是哪一本？"
+      ]
+    },
+    {
+      "name": "技术闲聊",
+      "label": "技术闲聊",
+      "action": "skip",
+      "enabled": true,
+      "threshold": 0.58,
+      "examples": [
+        "这个程序怎样把列表按名称排序？",
+        "给库存表加一个分页按钮吧。",
+        "库存项目的日期输入框需要格式校验。",
+        "这个测试函数应该怎样传入空数组？",
+        "先为待办接口补一个错误提示。",
+        "网页的搜索框还需要清除按钮。",
+        "把订单项目里的重复函数合并一下。",
+        "这份演示配置如何切换开发端口？",
+        "帮我检查代码中的变量命名。",
+        "这个请求应该返回哪种状态码？",
+        "柱状图怎样适应小屏幕？",
+        "先给书目表补上排序测试。",
+        "测试环境的表单提交后需要禁用按钮吗？",
+        "如何在教程里表示一个可选字段？",
+        "书目项目的缓存过期时间应怎样配置？",
+        "这段温度转换代码哪里算错了？",
+        "应用应怎样处理不存在的页面？",
+        "为文件列表加一个筛选条件。",
+        "这个组件的边距再缩小一点。",
+        "代码里的模拟请求为何没有等待返回？",
+        "先在测试数据库里验证新查询语句。"
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "route": "intimate_contact",
+      "action": "skip",
+      "text": "我想把这段亲密时间留给眼前的我们，先不翻旧事。"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "那份读书会安排，上次定在几楼？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "我们之前给练习项目取的名字是什么？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "上回讨论地图集时，我为什么选择了新版？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "先前那份出游清单里带了哪些东西？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "还记得我们上次用什么办法修好表格吗？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "之前商量的图书交换活动后来怎样安排了？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "我们第一次讨论那本虚构小说时说了什么？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "上次你帮我整理的练习步骤有哪些？"
+    },
+    {
+      "route": "recall_needed",
+      "action": "recall",
+      "text": "之前给故事角色选的围巾是什么颜色？"
+    },
+    {
+      "route": "技术闲聊",
+      "action": "skip",
+      "text": "演示项目启动后先加载两条测试记录，后续分页由客户端发起请求。"
+    }
+  ]
+}
