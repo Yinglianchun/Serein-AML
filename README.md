@@ -62,6 +62,30 @@ The adapter reuses the public Scout's inventory, source hydration, keyword/entit
 
 AML does not exercise Serein's automatic decision to speak or stay quiet, repeated-delivery cooldown, or `resume` in a new chat. An ordinary conversational demonstration is needed to show those capabilities.
 
+`SEREIN_AML_PLAN_ARCS=1`, together with `SEREIN_AML_EXPAND_ARCS=1`, replaces the
+title-only menu choice with a bounded evidence assessment. The public reranker
+first orders up to 100 current candidates. The selected Search Writer sees at
+most eight current Event/Scene/original records within 8,000 characters and the
+body-free menus. It cites exact visible evidence, checks whether every requested
+relationship and time condition is supported, and either stops or identifies up
+to four missing relationships and chooses up to five menu items for those gaps.
+The competition Writer remains mini; development uses its existing assignment.
+
+When a material is read, a second bounded call reviews its actual text together
+with its Arc anchor and the current evidence. Read text plus anchors is bounded
+to 8,000 characters. Shared topic alone does not justify inclusion. A bridge need
+not mention the original subject: the model evaluates the combined connection.
+Accepted items require exact visible quotes from both anchor and material before
+earning reserved result slots. These quotes also receive space in the final
+excerpt budget. Invalid assessments, invented refs/quotes and declined reviews
+do not expand the evidence; independently retrieved records remain eligible.
+Domain, current revision, membership and fingerprint checks still apply before
+returning anything, and excluded or stale material is not sent to the reviewer.
+If no new material is admitted, the initial reranking is reused. There is one
+menu expansion and at most two decision calls, with no additional retrieval loop
+or generated answer. Model judgments still do not prove semantic entailment.
+This Search-only flag does not alter stored memory or the ingestion profile.
+
 ## API
 
 - `GET /health` — unauthenticated health endpoint.
@@ -99,6 +123,7 @@ Optional:
 -e SEREIN_AML_RETURN_CAP=40
 -e SEREIN_AML_CONTEXT_CHAR_CAP=24000
 -e SEREIN_AML_EXPAND_ARCS=1
+-e SEREIN_AML_PLAN_ARCS=1
 -e SEREIN_AML_ORGANIZE_ARCS=1
 -e SEREIN_AML_WRITE_NARRATIVES=1
 -e SEREIN_AML_TAG_MEMORIES=1

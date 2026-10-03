@@ -89,23 +89,36 @@ def retrieval_mode(engine, mode, trace):
     # Evaluation-only ablation, one search at a time. Writer/tagger/profile and
     # raw-original fallback stay identical. Never force the model's selections.
     expand, entities, chooser = engine._EXPAND_ARCS, engine._EXPAND_ENTITIES, engine._arc_selections
+    planner = engine.arc_planning.choose
     engine._EXPAND_ARCS = mode != "base"
     engine._EXPAND_ENTITIES = False
 
-    def choose(query, options, menus):
-        visible = {key: {**menu, "materials": [item for item in menu["materials"]
+    def visible_menus(menus):
+        return {key: {**menu, "materials": [item for item in menu["materials"]
                     if mode != "materials" or item["index"] != 0]} for key, menu in menus.items()}
+
+    def choose(query, options, menus):
+        visible = visible_menus(menus)
         choices = chooser(query, options, visible)
         trace.extend({"arc_key": key, "picks": picks,
                       "selected_ids": [item["id"] for item in visible[key]["materials"] if item["index"] in picks]}
                      for key, picks in choices)
         return choices
 
+    def planned(model, query, options, evidence, menus):
+        visible = visible_menus(menus)
+        choices = planner(model, query, options, evidence, visible)
+        trace.extend({**choice, "selected_ids": [item["id"] for item in visible[choice["arc_key"]]["materials"]
+                                                if item["index"] in choice["picks"]]} for choice in choices)
+        return choices
+
     engine._arc_selections = choose
+    engine.arc_planning.choose = planned
     try:
         yield
     finally:
         engine._EXPAND_ARCS, engine._EXPAND_ENTITIES, engine._arc_selections = expand, entities, chooser
+        engine.arc_planning.choose = planner
 
 
 def run(report_path, top_k):
@@ -129,7 +142,7 @@ def run(report_path, top_k):
     engine._DATA_ROOT = Path(work.name)
     report = {"kind": "synthetic_literal_evidence_ablation", "profile": "development", "scoring_languages": ["en", "zh"],
               "transport": os.environ.get("SEREIN_AML_PROBE_TRANSPORT", "configured_api"),
-              "top_k": top_k, "entity_expansion": False, "adds": [], "calls": [], "results": [],
+              "top_k": top_k, "entity_expansion": False, "arc_planning": engine._PLAN_ARCS, "adds": [], "calls": [], "results": [],
               "limitations": ["Literal phrase coverage is not entailment or answer accuracy.",
                               "Unmatched records and distractor units are diagnostics, not precision scores.",
                               "Baseline includes searchable unfinished/unselected original messages.",

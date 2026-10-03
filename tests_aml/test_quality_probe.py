@@ -61,7 +61,8 @@ def test_material_ablation_hides_volume_without_forcing_model_picks():
         seen.append(menus)
         return [("work", [2])]
 
-    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _arc_selections=selector)
+    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _arc_selections=selector,
+                             arc_planning=SimpleNamespace(choose=lambda *_: []))
     menu = {"work": {"title": "Work", "materials": [{"index": 0, "id": "roll"},
                                                       {"index": 2, "id": "event"}]}}
     trace = []
@@ -78,13 +79,33 @@ def test_material_ablation_hides_volume_without_forcing_model_picks():
 def test_ablation_restores_engine_after_failure():
     from types import SimpleNamespace
     selector = lambda *_: []
-    engine = SimpleNamespace(_EXPAND_ARCS=True, _EXPAND_ENTITIES=True, _arc_selections=selector)
+    engine = SimpleNamespace(_EXPAND_ARCS=True, _EXPAND_ENTITIES=True, _arc_selections=selector,
+                             arc_planning=SimpleNamespace(choose=lambda *_: []))
     with pytest.raises(RuntimeError):
         with retrieval_mode(engine, "base", []):
             assert not engine._EXPAND_ARCS
             raise RuntimeError("failed search")
     assert engine._EXPAND_ARCS and engine._EXPAND_ENTITIES
     assert engine._arc_selections is selector
+
+
+def test_planned_material_ablation_keeps_current_evidence_and_hides_volume():
+    from types import SimpleNamespace
+    seen = []
+    def planner(model, query, options, evidence, menus):
+        seen.append((evidence, menus))
+        return [{"arc_key": "work", "picks": [2], "missing": "A work location"}]
+    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _arc_selections=lambda *_: [],
+                             arc_planning=SimpleNamespace(choose=planner))
+    evidence = [{"ref": "anchor", "text": "Current evidence"}]
+    menus = {"work": {"title": "Work", "materials": [{"index": 0, "id": "roll"}, {"index": 2, "id": "event"}]}}
+    trace = []
+    with retrieval_mode(engine, "materials", trace):
+        assert engine.arc_planning.choose(None, "question", None, evidence, menus)
+    assert seen[0][0] is evidence
+    assert seen[0][1]["work"]["materials"] == [{"index": 2, "id": "event"}]
+    assert trace[0]["selected_ids"] == ["event"]
+    assert engine.arc_planning.choose is planner
 
 
 def test_chinese_translation_preserves_evidence_units():
