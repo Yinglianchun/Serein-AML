@@ -73,12 +73,15 @@ def configuration():
     # Copy only selected model connections, never features, identity or deployment data.
     fields = ("id", "model", "base_url", "api_key", "protocol", "dimension",
               "query_instruction", "document_instruction", "request_timeout_seconds")
+    write_narratives = os.getenv("SEREIN_AML_WRITE_NARRATIVES", "0") == "1"
     changes = {"models": [{k: m[k] for k in fields if k in m} for m in models.values()],
                "assignments": assignments,
                "pipeline": {"execution_mode": "api", "auto_enabled": True},
                "recall": {"passages_enabled": True},
-               "features": {"narrative_nightly_organize": os.getenv("SEREIN_AML_ORGANIZE_ARCS", "0") == "1"}}
+               "features": {"narrative_nightly_organize": write_narratives or os.getenv("SEREIN_AML_ORGANIZE_ARCS", "0") == "1",
+                            "narrative_tools": write_narratives}}
     public_profile = {"profile": profile, "pipeline_adapter": "stage-format-v4", "assignments": assignments,
+                      "narrative_authoring": write_narratives,
                       "models": [{k: v for k, v in m.items() if k != "api_key"} for m in changes["models"]]}
     signature = hashlib.sha256(encode(public_profile).encode()).hexdigest()
     return changes, {"profile": profile, "signature": signature}
@@ -256,9 +259,14 @@ async def organize_arcs(settings):
     result = await scan(settings)
     if result["external_scout_status"] in {"error", "unavailable"}:
         raise RuntimeError("Public Arc Scout did not complete")
-    # The public automatic path creates collecting lines and material links only.
-    # Prose keeps the public explicit authoring/preview/save boundary.
     return result
+
+
+async def author_narratives(settings):
+    if os.getenv("SEREIN_AML_WRITE_NARRATIVES", "0") != "1":
+        return {"status": "disabled"}
+    from .narratives import author
+    return await author(settings)
 
 
 @contextmanager
