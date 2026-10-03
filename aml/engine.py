@@ -178,6 +178,7 @@ def add_memory(*, request_id: str, messages: list[dict[str, Any]], user_id: str,
             if result["rejected"]:
                 raise ValueError("Public original archive rejected an AML message")
         pipeline_result = asyncio.run(runtime.ingest_pipeline(settings))
+        tagging_result = asyncio.run(runtime.tag_memories(settings))
         _sync_index(paths)
         try:
             prepared = runtime.prepare_memory(settings)
@@ -185,6 +186,8 @@ def add_memory(*, request_id: str, messages: list[dict[str, Any]], user_id: str,
                 fill_vectors(prepared)
                 fill_passages(prepared)
             originals.fill(prepared)
+            if tagging_result["status"] == "ok":
+                tagging_result["indexes"] = asyncio.run(runtime.refresh_tagging(prepared))
             scout_result = asyncio.run(runtime.organize_arcs(prepared))
             narrative_result = asyncio.run(runtime.author_narratives(prepared))
             # Published prose must be visible to lexical lookup before Add succeeds.
@@ -194,7 +197,7 @@ def add_memory(*, request_id: str, messages: list[dict[str, Any]], user_id: str,
             raise RuntimeError("Public indexing or Arc organization did not complete") from error
         with Store(paths.database) as store:
             store.conn.execute("UPDATE aml_add_receipts SET status='complete',result_json=? WHERE id=?",
-                               (encode({"pipeline": pipeline_result, "scout": scout_result,
+                               (encode({"pipeline": pipeline_result, "tagging": tagging_result, "scout": scout_result,
                                         "narratives": narrative_result}), receipt_id))
     return receipt_id
 

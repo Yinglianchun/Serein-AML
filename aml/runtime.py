@@ -18,7 +18,7 @@ from serein.extensions import pipeline
 
 
 ACTIVE_DATABASE = ContextVar("aml_database", default=None)
-GENERATIVE_ROLES = ("track_router", "event_curator", "event_writer", "writer", "narrative_scout")
+GENERATIVE_ROLES = ("track_router", "event_curator", "event_writer", "writer", "narrative_scout", "operit_tagging")
 CURATOR_FORMAT = """\nJSON structure reminder (no change to the role or evidence rules):
 Each decision_review.events item has event_index and reason. Do NOT add an
 evidence field to those items. Optional materials/admission use only the exact
@@ -74,6 +74,7 @@ def configuration():
     fields = ("id", "model", "base_url", "api_key", "protocol", "dimension",
               "query_instruction", "document_instruction", "request_timeout_seconds")
     write_narratives = os.getenv("SEREIN_AML_WRITE_NARRATIVES", "0") == "1"
+    tag_memories = os.getenv("SEREIN_AML_TAG_MEMORIES", "0") == "1"
     changes = {"models": [{k: m[k] for k in fields if k in m} for m in models.values()],
                "assignments": assignments,
                "pipeline": {"execution_mode": "api", "auto_enabled": True},
@@ -82,6 +83,7 @@ def configuration():
                             "narrative_tools": write_narratives}}
     public_profile = {"profile": profile, "pipeline_adapter": "stage-format-v4", "assignments": assignments,
                       "narrative_authoring": write_narratives,
+                      "memory_tagging": tag_memories,
                       "models": [{k: v for k, v in m.items() if k != "api_key"} for m in changes["models"]]}
     signature = hashlib.sha256(encode(public_profile).encode()).hexdigest()
     return changes, {"profile": profile, "signature": signature}
@@ -267,6 +269,20 @@ async def author_narratives(settings):
         return {"status": "disabled"}
     from .narratives import author
     return await author(settings)
+
+
+async def tag_memories(settings):
+    if os.getenv("SEREIN_AML_TAG_MEMORIES", "0") != "1":
+        return {"status": "disabled"}
+    from .tagging import run
+    return await run(settings)
+
+
+async def refresh_tagging(settings):
+    if os.getenv("SEREIN_AML_TAG_MEMORIES", "0") != "1":
+        return {"status": "disabled"}
+    from .tagging import refresh
+    return await refresh(settings)
 
 
 @contextmanager
