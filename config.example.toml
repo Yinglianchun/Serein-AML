@@ -1,0 +1,32 @@
+# Copy this file to config.toml. Every path is relative to that file.
+[storage]
+database = "./.runtime/serein.db"
+index = "./.runtime/recall-index.sqlite"
+[runtime]
+writable = true
+[recall]
+direct_threshold = 0.65
+max_cards = 2
+candidate_limit = 50
+passages_enabled = false
+passage_min_chars = 500
+# Required when semantic recall is configured; generated using prepare-routes.
+# routing_file = "./.runtime/query-routes.json"
+# [embedding]
+# endpoint = "https://embedding.example/v1/embeddings"
+# api_key_env = "SEREIN_EMBEDDING_KEY"
+# [reranker]
+# endpoint = "https://reranker.example/v1/rerank"
+# model = "your-model"
+# api_key_env = "SEREIN_RERANKER_KEY"
+[extensions.relations]
+enabled = false
+[extensions.dreams]
+enabled = false
+[extensions.narrative_scout]
+enabled = false
+[extensions.event_pipeline]
+enabled = false
+# Agent setup: Settings -> Configure Agent, or docs/extensions.md
+# [mcp]
+# tools = ["read_memory", "recall_memory", "find_arc", "read_arc_materials"]

@@ -1,0 +1,62 @@
+{
+  "repository": "https://github.com/Yinglianchun/Serein",
+  "commit": "b5b13800ad086ea763afd9008ef3bdbfbb83c75b",
+  "previous_import_commit": "0bc2c64cf382193cd959c5e29ca1131a78297365",
+  "public_release_version": "0.1.0-rc65",
+  "backend_prefix": "src/serein/",
+  "backend_file_count": 232,
+  "local_overrides": {
+    "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
+    "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks"
+  },
+  "runtime_files": [
+    ".dockerignore",
+    ".gitattributes",
+    ".gitignore",
+    "AGENTS.md",
+    "Dockerfile",
+    "LICENSE",
+    "config.example.toml",
+    "pyproject.toml",
+    "scripts/event_agent_mcp.py"
+  ],
+  "regression_support_files": [
+    "examples/hook_host.py",
+    "scripts/event_agent_mcp.py"
+  ],
+  "regression_tests": [
+    "tests/test_authored_mcp_parity.py",
+    "tests/test_diary_discovery.py",
+    "tests/test_domain_rules.py",
+    "tests/test_event_handoff.py",
+    "tests/test_event_writer_concurrency.py",
+    "tests/test_gateway_contract.py",
+    "tests/test_live_clients.py",
+    "tests/test_live_events.py",
+    "tests/test_live_relations.py",
+    "tests/test_narrative_candidates.py",
+    "tests/test_passages_entities.py",
+    "tests/test_personal_recall.py",
+    "tests/test_pipeline_admission.py",
+    "tests/test_pipeline_append.py",
+    "tests/test_pipeline_audit.py",
+    "tests/test_pipeline_base_window.py",
+    "tests/test_pipeline_continuity.py",
+    "tests/test_pipeline_limits.py",
+    "tests/test_pipeline_materials.py",
+    "tests/test_pipeline_route_history.py",
+    "tests/test_protected_append_sources.py",
+    "tests/test_public_features.py",
+    "tests/test_public_settings.py",
+    "tests/test_recall_candidate_budget.py",
+    "tests/test_recall_policy.py",
+    "tests/test_search.py",
+    "tests/test_shared_bridge_boundary.py",
+    "tests/test_store.py",
+    "tests/test_surface_selection.py",
+    "tests/test_tagging_entities.py",
+    "tests/test_track_continuation_parity.py",
+    "tests/test_transcription_first.py",
+    "tests/test_writer_append_policy.py"
+  ]
+}
