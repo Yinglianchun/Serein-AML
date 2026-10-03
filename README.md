@@ -10,25 +10,29 @@ The 232 files under `src/serein/` match that fixed upstream commit. The import i
 
 The cached-image transcription regression is aligned with the current append-only writer contract: an extension reads new sources, while prior image transcriptions remain cached and bound to the existing Event.
 
-The AML adapter remains a separate retrieval path. Updating the backend does not enable semantic/vector retrieval or reranking in AML Search. This repository carries the backend needed by the API; the Serein web application remains in the original project.
+AML Search calls the same public `Services.recall` entry point as MCP `recall_memory`, with explicit `mode="lookup"` and `method="lexical"`. It does not enable semantic/vector retrieval or the automatic chat routing and reranking path. This repository carries the backend needed by the API; the Serein web application remains in the original project.
 
 ## What changes for AML
 
-The normal Serein chat path is intentionally conservative: routing may skip recall, surfacing is capped, cooldown applies, and relation expansion is small. Those are good product behaviors but poor leaderboard retrieval defaults.
+The normal Serein chat path chooses when memories should surface, limits delivered cards, and suppresses repeated delivery. AML supplies explicit retrieval questions and scores answers from the returned evidence, so this adapter selects lookup mode.
 
-The AML adapter therefore uses a separate path:
+The AML adapter adds competition orchestration around the public recall service:
 
 - isolates storage physically by exact `user_id`;
 - persists every Add request synchronously before returning HTTP 200;
 - keeps the raw source conversation in the canonical Serein Event body and source binding;
 - uses **gpt-4o-mini** during Add to derive grounded retrieval notes and named entities;
 - uses **gpt-4o-mini** during Search only for query rewriting / bridge discovery, never to answer the benchmark question;
-- retrieves through Serein's canonical SQLite store plus FTS index;
-- performs controlled entity bridge expansion for cross-fragment / multi-hop evidence;
+- retrieves through the public recall service, preserving Event/Scene domain rules, canonical readability, revision checks, and stale-index protection;
+- performs one bounded round of entity bridge expansion through that same service;
+- optionally shows body-free Narrative menus to the retrieval model and explicitly reads only its chosen materials (at most three menus and five items total);
 - does not apply Serein's normal route-skip, cooldown, or two-card surfacing cap;
+- bounds the total returned memory text by a character budget, reserving space for every selected record; long records may be returned as prefix excerpts;
 - returns the fixed AML `{"data": [...]}` schema and never exceeds `top_k`.
 
-The AML retrieval path remains the initial competition baseline. Semantic/vector retrieval and stronger relation composition are separate follow-up work that can preserve the public API contract.
+MCP and automatic recall share the `typed_memory` card and Narrative menu renderer, but their envelopes and selection rules differ. MCP adds versions, comments and optional evidence; automatic recall wraps the selected context for chat delivery. AML keeps its required `data` array and returns the selected canonical memory bodies, rather than tool-call instructions or a generated answer.
+
+Narrative expansion is opt-in. It does not create volumes during Add: existing volume memberships are required. The current Add path still creates Events only, so enabling expansion alone does not give a fresh evaluation database any Narrative volumes. Synthetic fixtures test the read path; automatic volume organization is separate work.
 
 ## API
 
@@ -55,15 +59,17 @@ docker run --rm -p 8000:8000 \
   serein-aml
 ```
 
-The open-source AML method fixes its Add/Search LLM to `gpt-4o-mini`.
+The open-source AML method fixes its Add/Search LLM to `gpt-4o-mini`. For OpenRouter, set `OR_key` in the process environment instead of `OPENAI_API_KEY`; the adapter selects `https://openrouter.ai/api/v1` and sends the required `openai/gpt-4o-mini` identifier. Alternatively, set `OPENAI_API_KEY` and `OPENAI_BASE_URL` explicitly. Credentials are never read from memory records or committed configuration. Responses are stateless (`store=false`).
 
 Optional:
 
 ```bash
 -e SEREIN_AML_RETURN_CAP=40
+-e SEREIN_AML_CONTEXT_CHAR_CAP=24000
+-e SEREIN_AML_EXPAND_ARCS=1
 ```
 
-The formal AML request may use `top_k=100`; the local return cap can be tuned up to 100 while always respecting the requested maximum.
+The formal AML request may use `top_k=100`; the local return cap can be tuned up to 100 while always respecting the requested maximum. The context cap counts characters across all returned `content` fields, not tokens. Set `SEREIN_AML_EXPAND_ARCS=1` to enable menu selection; it is disabled by default and never reads a whole volume implicitly. The retrieval model may decline to expand any menu. Invalid or changed selections are ignored.
 
 ## Test
 
