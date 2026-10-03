@@ -118,6 +118,32 @@ python -m pip install '.[http,background,test]'
 pytest -q tests_aml tests
 ```
 
+The optional synthetic quality probe compares base lookup, menus restricted to
+individual materials, and menus that also offer completed Narrative bodies on
+the same newly ingested database. It uses six invented sessions (31 raw dialogue
+messages), including employment and premises updates across sessions, namesake
+confusion, retracted explanations, corrected dates, incidental details, and an
+unfinished original. No prewritten Serein memories or benchmark answers are
+provided to Add.
+
+```bash
+SEREIN_AML_PROFILE=development SEREIN_AML_MODEL_CONFIG=/path/to/public-models.json \
+  python -m evals.quality --report .local/quality-report.json --top-k 4
+```
+
+The probe requires explicitly selected non-mini development models. It creates
+and deletes its own temporary database, and enables tagging, Scout and Narrative
+writing before ingestion. Entity expansion is disabled in all three comparison
+modes to isolate menu behavior; the baseline retains the normal original-message
+fallback. Actual menu choices remain model decisions. Questions and expected
+evidence labels are never added to memory; labels are used only by local scoring
+after Search returns. The report records missing evidence units, selected IDs,
+returned synthetic text, distractor matches, character use, calls and duration.
+Phrase coverage is a diagnostic, not semantic entailment, answer accuracy or an
+official AML score. Missing evidence is reported without rerunning models to
+force a better result. API failures stop the run and leave a partial report.
+This small probe does not establish large-history throughput or mini quality.
+
 ## Data handling
 
 Evaluation data is stored under `SEREIN_AML_DATA_DIR`, with one hashed directory per exact `user_id`. `session_id` is retained only as source provenance and is never used as a Search isolation filter.
