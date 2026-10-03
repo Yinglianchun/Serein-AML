@@ -27,7 +27,10 @@ from serein.compat.raw_archive import raw_archive
 from serein.configured_models import effective_settings
 from serein.recall.vectors import fill_vectors
 from serein.recall.passages import fill_passages
-from . import runtime, originals
+from serein.recall.policy import RecallPolicy
+from serein.recall.query import Query
+from serein.recall.scene import domain_rejection
+from . import runtime, originals, bridges
 
 
 MODEL = "gpt-4o-mini"
@@ -35,6 +38,7 @@ _DATA_ROOT = Path(os.getenv("SEREIN_AML_DATA_DIR", "./.aml-data"))
 _RETURN_CAP = max(1, min(100, int(os.getenv("SEREIN_AML_RETURN_CAP", "40"))))
 _CONTEXT_CHAR_CAP = max(1000, int(os.getenv("SEREIN_AML_CONTEXT_CHAR_CAP", "24000")))
 _EXPAND_ARCS = os.getenv("SEREIN_AML_EXPAND_ARCS", "0") == "1"
+_EXPAND_ENTITIES = os.getenv("SEREIN_AML_EXPAND_ENTITIES", "0") == "1"
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -285,6 +289,56 @@ MENUS:
     return [(key, picks) for key, picks in selected.items() if picks]
 
 
+def _bridge_candidate(services, prepared, query, seed_hits):
+    """Try multiple direct seeds once; admit at most one new related candidate."""
+    policy = RecallPolicy.from_config(prepared.recall)
+    original_query = Query(query, mode="lookup", intent="direct")
+    seed_ids = {hit['id'] for hit in seed_hits}
+    choices = []
+    with Reader(prepared.database) as reader:
+        for plan in bridges.plans(reader, query, seed_hits):
+            found = {}
+            if prepared.embedding:
+                found.update((hit['id'], hit) for hit in
+                             _recall_hits(services, plan['query'], limit=20, method='semantic'))
+            for phrase in plan['lexical_queries']:
+                found.update((hit['id'], hit) for hit in
+                             _recall_hits(services, phrase, limit=20, method='lexical'))
+            found.update((hit['id'], hit) for hit in
+                         originals.hits(prepared, plan['query'], plan['lexical_queries'], limit=20))
+            eligible = []
+            for hit in found.values():
+                if hit['id'] in seed_ids:
+                    continue
+                if hit['kind'] != 'original' and domain_rejection(hit['document'], original_query, policy):
+                    continue
+                quote = bridges.matching_quote(plan, hit)
+                if quote:
+                    eligible.append((hit, quote))
+            if not eligible:
+                continue
+            ranked = {}
+            if prepared.reranker:
+                from serein.adapters.reranker import RerankerClient
+                ranked = RerankerClient(**prepared.reranker)(plan['query'], [
+                    {'ref': hit['id'], 'title': hit['document']['title'] if hit['kind'] != 'original' else 'Pending original',
+                     'body': bridges.text(hit)} for hit, _ in eligible])
+            for position, (hit, quote) in enumerate(eligible):
+                # Rank against the missing relationship, never the original subject alone.
+                score = ranked.get(hit['id'], 0.0) if prepared.reranker else 1 / (60 + position)
+                if prepared.reranker and score <= 0:
+                    continue
+                choices.append((score, -plan['anchor_rank'], hit['id'], hit, {
+                    'ids': (plan['anchor'], hit['id']), 'route': 'entity_relation',
+                    'plan': plan, 'target_quote': quote,
+                    'focus': {plan['anchor']: [plan['anchor_quote']],
+                              hit['id']: [quote]}}))
+    if not choices:
+        return [], []
+    best = max(choices, key=lambda row: (row[0], row[1], row[2]))
+    return [best[3]], [best[4]]
+
+
 def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
     if not query.strip():
         return []
@@ -313,29 +367,26 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
         for position, lexical_query in enumerate(plan["queries"]):
             add_ranked(_recall_hits(services, lexical_query, method="lexical"), 1.0 if position < 2 else 0.75)
 
-        direct = sorted(scores, key=lambda item: (-scores[item], item))[:12]
-        bridge_entities: list[str] = []
-        seen = {e.casefold() for e in plan["entities"]}
-        for document_id in direct:
-            metadata = candidates[document_id]["document"].get("metadata") or {}
-            for entity in metadata.get("aml_entities") or []:
-                value = str(entity).strip()
-                folded = value.casefold()
-                if value and folded not in seen:
-                    seen.add(folded)
-                    bridge_entities.append(value)
-                if len(bridge_entities) >= 10:
-                    break
-            if len(bridge_entities) >= 10:
-                break
-        for entity in bridge_entities:
-            add_ranked(_recall_hits(services, entity, limit=40, method="lexical"), 0.35)
+        source_hits = originals.hits(prepared, query, plan["queries"] + plan["entities"])
+        for rank, hit in enumerate(source_hits, 1):
+            candidates[hit["id"]] = hit
+            scores[hit["id"]] = .85 / (60 + rank)
+        direct = sorted(scores, key=lambda item: (-scores[item], item))[:bridges.MAX_SEEDS]
+        arc_seeds = sorted(scores, key=lambda item: (-scores[item], item))[:6]
+        direct_ids = set(candidates)
+        evidence_groups = []
+        if _EXPAND_ENTITIES:
+            hits, groups = _bridge_candidate(services, prepared, query, [candidates[key] for key in direct])
+            add_ranked(hits, .35)
+            evidence_groups.extend(groups)
 
-        expanded_ids = set()
         if _EXPAND_ARCS and candidates:
-            seeds = sorted(scores, key=lambda item: (-scores[item], item))[:6]
+            # An expansion is never a seed for another expansion in this Search.
+            seeds = arc_seeds
             with Reader(paths.database) as reader:
-                _, menus = _arcs(reader, [candidates[item] for item in seeds])
+                by_owner, menus = _arcs(reader, [candidates[item] for item in seeds if candidates[item]['kind'] != 'original'])
+                anchors = {key: next(owner for owner in seeds if any(card['arc_key'] == key
+                           for card in by_owner.get(owner, []))) for key in menus}
                 for menu in menus.values():
                     volume_id = next(item["id"] for item in menu["materials"] if item["index"] == 0)
                     volume = reader.read(volume_id, kind="narrative", with_evidence=False)
@@ -356,15 +407,14 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     hits = [{"id": item["id"], "kind": item["kind"],
                              "object": item["object"], "document": item["object"]["document"]}
                             for item in page["items"] if item["object"]["readable"]]
-                    expanded_ids.update(hit["id"] for hit in hits)
                     add_ranked(hits, 1.0)
+                    evidence_groups.extend({'ids': (anchors[key], hit['id']), 'route': 'arc_menu',
+                                            'arc_key': key, 'menu_fingerprint': page['menu_fingerprint']}
+                                           for hit in hits)
 
-        source_hits = originals.hits(prepared, query, plan["queries"] + plan["entities"])
-        for rank, hit in enumerate(source_hits, 1):
-            candidates[hit["id"]] = hit
-            scores[hit["id"]] = .85 / (60 + rank)
-        kept = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(expanded_ids)]
-        kept = list(dict.fromkeys([*kept, *sorted(expanded_ids)]))
+        protected = {key for group in evidence_groups for key in group['ids']}
+        kept = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
+        kept = list(dict.fromkeys([*kept, *sorted(protected)]))
         scores = {key: scores[key] for key in kept}
         candidates = {key: candidates[key] for key in kept}
         if prepared.reranker and candidates:
@@ -373,41 +423,76 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                           "body": hit["document"]["body_md"] if hit["kind"] != "original" else hit["content"]}
                          for key, hit in candidates.items()]
             reranked = RerankerClient(**prepared.reranker)(query, documents)
-            # Explicit lookup keeps admitted evidence; reranking orders it, rather
-            # than borrowing automatic surface gates or answering the question.
+            # These scores order individual records. Complete selected evidence
+            # groups are reserved separately; a bridge may not mention the subject.
             scores = {key: reranked.get(key, 0.0) + min(score, .1)*.001 for key, score in scores.items()}
         ordered = sorted(scores, key=lambda item: (-scores[item], item))
         output: list[dict[str, Any]] = []
-        selected: list[dict[str, Any]] = []
+        records = {}
+        policy = RecallPolicy.from_config(prepared.recall)
+        original_query = Query(query, mode='lookup', intent='direct')
+        pending = {'raw:'+str(row['id']): row for row in originals.pending(paths.database)} if any(
+            hit['kind'] == 'original' for hit in candidates.values()) else {}
         with Reader(paths.database) as reader:
             for document_id in ordered:
-                if len(selected) >= min(top_k, _RETURN_CAP):
-                    break
                 hit = candidates[document_id]
                 if hit["kind"] == "original":
-                    selected.append({"id": document_id, "content": hit["content"], "score": scores[document_id],
-                                     "created_at": hit["created_at"]})
+                    if document_id not in pending or pending[document_id]['text'] != hit['content']:
+                        continue
+                    records[document_id] = {"id": document_id, "content": hit["content"], "score": scores[document_id],
+                                            "created_at": hit["created_at"]}
                     continue
                 current = reader.read(document_id, kind=hit["kind"], with_evidence=False)
                 if not current["readable"]:
                     continue
                 document = current["document"]
+                if domain_rejection(document, original_query, policy):
+                    continue
                 if document.get("revision") != hit["document"].get("revision"):
                     continue
                 if not document["body_md"].strip():
                     continue
-                selected.append({"id": document_id, "content": document["body_md"], "score": scores[document_id],
-                                 "created_at": document.get("created_at")})
+                records[document_id] = {"id": document_id, "content": document["body_md"], "score": scores[document_id],
+                                        "created_at": document.get("created_at")}
+            valid_groups = []
+            for group in evidence_groups:
+                if not all(key in records for key in group['ids']):
+                    continue
+                if group['route'] == 'entity_relation':
+                    bridge_plan = group['plan']
+                    _, stamp = bridges.grounded_entities(reader, candidates[bridge_plan['anchor']])
+                    if stamp != bridge_plan['anchor_stamp'] or not bridges.matching_quote(
+                            bridge_plan, candidates[group['ids'][1]]):
+                        continue
+                else:
+                    _, current_menus = _arcs(reader, [], arc_key=group['arc_key'])
+                    if current_menus.get(group['arc_key'], {}).get('menu_fingerprint') != group['menu_fingerprint']:
+                        continue
+                valid_groups.append(group)
+        valid_expansions = {key for group in valid_groups for key in group['ids']}
+        records = {key: record for key, record in records.items() if key in direct_ids or key in valid_expansions}
+        selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP))
         # Reserve space for every chosen record; one long volume must not crowd out other evidence.
         budget = _CONTEXT_CHAR_CAP
-        allowances: dict[str, int] = {}
+        allowances: dict[str, int] = {item['id']: 0 for item in selected}
+        for group in valid_groups:
+            if not all(key in allowances for key in group['ids']):
+                continue
+            minimums = {key: len(quotes[0]) for key, quotes in group.get('focus', {}).items()
+                        if quotes and quotes[0] in records[key]['content']}
+            required = sum(max(0, size-allowances[key]) for key, size in minimums.items())
+            if required <= budget:
+                for key, size in minimums.items():
+                    allowances[key] = max(allowances[key], size)
+                budget -= required
         shortest_first = sorted(selected, key=lambda item: len(item["content"]))
         for position, item in enumerate(shortest_first):
-            length = min(len(item["content"]), budget // (len(shortest_first) - position))
-            allowances[item["id"]] = length
+            length = min(len(item["content"])-allowances[item['id']], budget // (len(shortest_first) - position))
+            allowances[item["id"]] += length
             budget -= length
         for item in selected:
-            content = item["content"][:allowances[item["id"]]]
+            focus = [quote for group in valid_groups for quote in group.get('focus', {}).get(item['id'], [])]
+            content = bridges.excerpt(item["content"], allowances[item["id"]], focus)
             if content.strip():
                 output.append({**item, "content": content})
     return output

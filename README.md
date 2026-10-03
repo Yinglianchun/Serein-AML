@@ -30,6 +30,8 @@ The AML adapter adds competition orchestration around the public recall service:
 - orders evidence with the configured public RerankerClient, preserving lookup admission rather than applying automatic surfacing thresholds;
 - optionally runs the public automatic Arc Scout after ingestion, creating collecting lines or appending material links to existing Arcs;
 - optionally shows body-free Narrative menus to the retrieval model and explicitly reads only its chosen materials (at most three menus and five items total);
+- retains each admitted Arc selection together with its direct anchor within the final result cap, rather than dropping the bridge on its individual similarity to the original question;
+- optionally tries one round of entity-plus-relationship retrieval from up to five direct hits, trying at most three bridge entities and adding at most one related candidate;
 - does not apply Serein's normal route-skip, cooldown, or two-card surfacing cap;
 - bounds the total returned memory text by a character budget, reserving space for every selected record; long records may be returned as prefix excerpts;
 - returns the fixed AML `{"data": [...]}` schema and never exceeds `top_k`.
@@ -37,6 +39,12 @@ The AML adapter adds competition orchestration around the public recall service:
 MCP and automatic recall share the `typed_memory` card and Narrative menu renderer, but their envelopes and selection rules differ. MCP adds versions, comments and optional evidence; automatic recall wraps the selected context for chat delivery. AML keeps its required `data` array and returns the selected canonical memory bodies, rather than tool-call instructions or a generated answer.
 
 Both automatic organization and menu expansion are opt-in. `SEREIN_AML_ORGANIZE_ARCS=1` enables the public Scout on the isolated benchmark database after each Add; the nightly wall-clock delay is bypassed for synchronous ingestion. Scout reads bounded public candidates and may decline to group them. It creates empty collecting lines and material relationships, preserving the public boundary that automatic organization does **not** author Narrative prose. Existing authored volumes retain their preview/save contract. `SEREIN_AML_EXPAND_ARCS=1` lets Search choose and read related materials from these menus, so a new evaluation database can exercise real automatic grouping without manually supplied themes.
+
+`SEREIN_AML_EXPAND_ENTITIES=1` enables a separate, bounded lookup route without another generative-model call. It reads current public entity extractions, revalidates their exact source quotes, and falls back to a few literal English-name, Chinese-organization and quoted-title rules when a new Event has no entity tags. Every bridge name must also occur in the delivered canonical anchor body. Suggested aliases are never merged. Source quotes keep `bound_source`, `memory_body` or `raw_original` provenance; changing the body or bindings invalidates the path. Nothing is written to public entity metadata or relationship tables.
+
+The initial templates cover factory/origin, location, affiliation and date questions. A named bridge is combined with the requested relationship and explicit time hints; lexical/semantic recall supplies candidates, and the selected public reranker scores them against this bridge query. An exact shared name and a requested predicate must appear together in the candidate text. Unsupported questions or absent new evidence stop immediately, and expansion results never seed another hop. These checks establish a literal evidence connection, **not** entailment of the answer or proof that a historical affiliation still holds. Time conditions remain retrieval hints; old and conflicting evidence is not automatically suppressed.
+
+Search tracks the anchor, bridge, query, exact support quotes and Arc fingerprint internally. After fresh canonical revision, visibility and original-question domain checks, complete groups receive slots within `min(top_k, SEREIN_AML_RETURN_CAP)`. Explicit Arc selections take precedence over the optional entity candidate. Failed paths cannot leak expansion-only records through ordinary ranking; independently retrieved records remain eligible. `top_k=1` cannot guarantee a two-record chain. The external AML schema remains unchanged. Within the character budget, fitting entity-chain quotes receive space before ordinary excerpts; long bodies are returned as literal excerpts, never generated summaries.
 
 The adapter reuses the public Scout's inventory, source hydration, keyword/entity/semantic candidate builders, prompt, candidate normalizer and material-only writes. It adds up to three format/validation attempts before applying a decision: invented targets, missing seed materials or invalid references request a corrected reply rather than silently producing an empty grouping result. Raw Scout replies and validation failures are archived locally. A valid `candidates=[]` remains an ordinary decision and is never retried to force an Arc. Transport failures leave Add pending for a whole-request retry. Public retired-binding cleanup and stale authored-volume hints still run. Changing eligible Arc targets also invalidates the scan fingerprint.
 
@@ -80,6 +88,7 @@ Optional:
 -e SEREIN_AML_CONTEXT_CHAR_CAP=24000
 -e SEREIN_AML_EXPAND_ARCS=1
 -e SEREIN_AML_ORGANIZE_ARCS=1
+-e SEREIN_AML_EXPAND_ENTITIES=1
 ```
 
 The formal AML request may use `top_k=100`; the local return cap can be tuned up to 100 while always respecting the requested maximum. The context cap counts characters across all returned `content` fields, not tokens. Set `SEREIN_AML_EXPAND_ARCS=1` to enable menu selection; it is disabled by default and never reads a whole volume implicitly. The retrieval model may decline to expand any menu. Invalid or changed selections are ignored.
