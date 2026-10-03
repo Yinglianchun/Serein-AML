@@ -8,6 +8,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from .engine import AddConflict, add_memory, api_key_matches, search_memory
+from .runtime import ProfileConflict
 
 
 app = FastAPI(title="Serein-AML", version="0.1.0")
@@ -82,10 +83,12 @@ def add(
             user_id=payload.user_id,
             session_id=payload.session_id,
         )
-    except AddConflict as exc:
+    except (AddConflict, ProfileConflict) as exc:
         raise HTTPException(status_code=409, detail={"reason": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"reason": str(exc)}) from exc
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail={"reason": "Public ingestion did not complete; retry the same request_id"}) from None
     return AddResponse(
         success=True,
         request_id=payload.request_id,
@@ -101,10 +104,8 @@ def search(
     x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
 ) -> SearchResponse:
     _authorize(authorization, x_api_key)
-    data = search_memory(
-        query=payload.query,
-        options=payload.options,
-        user_id=payload.user_id,
-        top_k=payload.top_k,
-    )
+    try:
+        data = search_memory(query=payload.query, options=payload.options, user_id=payload.user_id, top_k=payload.top_k)
+    except ProfileConflict as exc:
+        raise HTTPException(status_code=409, detail={"reason": str(exc)}) from exc
     return SearchResponse(data=[SearchItem(**item) for item in data])

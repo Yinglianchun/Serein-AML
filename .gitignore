@@ -11,6 +11,7 @@ __pycache__/
 *.db
 *.sqlite*
 .env
+.aml-data/
 config.toml
 build/
 .playwright-cli/

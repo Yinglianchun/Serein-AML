@@ -10,7 +10,7 @@ The 232 files under `src/serein/` match that fixed upstream commit. The import i
 
 The cached-image transcription regression is aligned with the current append-only writer contract: an extension reads new sources, while prior image transcriptions remain cached and bound to the existing Event.
 
-AML Search calls the same public `Services.recall` entry point as MCP `recall_memory`, with explicit `mode="lookup"` and `method="lexical"`. It does not enable semantic/vector retrieval or the automatic chat routing and reranking path. This repository carries the backend needed by the API; the Serein web application remains in the original project.
+AML Search calls the same public `Services.recall` entry point as MCP `recall_memory`, with explicit `mode="lookup"`. With a selected embedding model, it queries the original question semantically and supplements it with lexical searches. The public reranker orders the combined evidence. This repository carries the backend needed by the API; the Serein web application remains in the original project.
 
 ## What changes for AML
 
@@ -20,11 +20,15 @@ The AML adapter adds competition orchestration around the public recall service:
 
 - isolates storage physically by exact `user_id`;
 - persists every Add request synchronously before returning HTTP 200;
-- keeps the raw source conversation in the canonical Serein Event body and source binding;
-- uses **gpt-4o-mini** during Add to derive grounded retrieval notes and named entities;
-- uses **gpt-4o-mini** during Search only for query rewriting / bridge discovery, never to answer the benchmark question;
+- archives exact user/assistant source messages, roles and supplied timestamps in the public original archive;
+- runs the public **Track Router → Event Curator → Event Writer** pipeline, including its source ownership, exact-quote and settlement validations;
+- uses **gpt-4o-mini** for every generative role in the competition profile, including Scout and Search helpers, never to answer the benchmark question;
+- permits explicitly configured other models for development in a separate fresh database;
 - retrieves through the public recall service, preserving Event/Scene domain rules, canonical readability, revision checks, and stale-index protection;
-- performs one bounded round of entity bridge expansion through that same service;
+- prepares the selected public embedding profile, routes and vector/passage indexes, and synchronously fills new coverage;
+- retains incomplete and Curator-unselected dialogue as searchable original evidence, with disposable vectors using that same embedding profile; settled Event sources are excluded from this fallback;
+- orders evidence with the configured public RerankerClient, preserving lookup admission rather than applying automatic surfacing thresholds;
+- optionally runs the public automatic Arc Scout after ingestion, creating collecting lines or appending material links to existing Arcs;
 - optionally shows body-free Narrative menus to the retrieval model and explicitly reads only its chosen materials (at most three menus and five items total);
 - does not apply Serein's normal route-skip, cooldown, or two-card surfacing cap;
 - bounds the total returned memory text by a character budget, reserving space for every selected record; long records may be returned as prefix excerpts;
@@ -32,7 +36,11 @@ The AML adapter adds competition orchestration around the public recall service:
 
 MCP and automatic recall share the `typed_memory` card and Narrative menu renderer, but their envelopes and selection rules differ. MCP adds versions, comments and optional evidence; automatic recall wraps the selected context for chat delivery. AML keeps its required `data` array and returns the selected canonical memory bodies, rather than tool-call instructions or a generated answer.
 
-Narrative expansion is opt-in. It does not create volumes during Add: existing volume memberships are required. The current Add path still creates Events only, so enabling expansion alone does not give a fresh evaluation database any Narrative volumes. Synthetic fixtures test the read path; automatic volume organization is separate work.
+Both automatic organization and menu expansion are opt-in. `SEREIN_AML_ORGANIZE_ARCS=1` enables the public Scout on the isolated benchmark database after each Add; the nightly wall-clock delay is bypassed for synchronous ingestion. Scout reads bounded public candidates and may decline to group them. It creates empty collecting lines and material relationships, preserving the public boundary that automatic organization does **not** author Narrative prose. Existing authored volumes retain their preview/save contract. `SEREIN_AML_EXPAND_ARCS=1` lets Search choose and read related materials from these menus, so a new evaluation database can exercise real automatic grouping without manually supplied themes.
+
+The adapter reuses the public Scout's inventory, source hydration, keyword/entity/semantic candidate builders, prompt, candidate normalizer and material-only writes. It adds up to three format/validation attempts before applying a decision: invented targets, missing seed materials or invalid references request a corrected reply rather than silently producing an empty grouping result. Raw Scout replies and validation failures are archived locally. A valid `candidates=[]` remains an ordinary decision and is never retried to force an Arc. Transport failures leave Add pending for a whole-request retry. Public retired-binding cleanup and stale authored-volume hints still run. Changing eligible Arc targets also invalidates the scan fingerprint.
+
+AML does not exercise Serein's automatic decision to speak or stay quiet, repeated-delivery cooldown, or `resume` in a new chat. An ordinary conversational demonstration is needed to show those capabilities.
 
 ## API
 
@@ -59,7 +67,11 @@ docker run --rm -p 8000:8000 \
   serein-aml
 ```
 
-The open-source AML method fixes its Add/Search LLM to `gpt-4o-mini`. For OpenRouter, set `OR_key` in the process environment instead of `OPENAI_API_KEY`; the adapter selects `https://openrouter.ai/api/v1` and sends the required `openai/gpt-4o-mini` identifier. Alternatively, set `OPENAI_API_KEY` and `OPENAI_BASE_URL` explicitly. Credentials are never read from memory records or committed configuration. Responses are stateless (`store=false`).
+The default `competition` profile fixes every generative role to `gpt-4o-mini`. For OpenRouter, set `OR_key` in the process environment instead of `OPENAI_API_KEY`; the adapter selects `https://openrouter.ai/api/v1` and sends `openai/gpt-4o-mini`. Alternatively, set `OPENAI_API_KEY` and `OPENAI_BASE_URL` explicitly. Generation requests use `store=false`. Add uses the public stage-runner entry point and model transport, with a Curator structure reminder and at most three validation attempts. The adapter tolerates JSON fences, one-object wrappers, numeric strings in integer fields, and unused extra fields on `decision_review.events` activity reasons. Original replies remain archived. Source ownership, action/base cardinality, boundary/disposition evidence, exact quotes and settlement still pass unchanged public validation; missing IDs or evidence are never filled in by the adapter. Credentials belong to runtime settings, never committed configuration.
+
+To exercise the complete semantic path, mount an explicitly exported **public model configuration** and set `SEREIN_AML_MODEL_CONFIG=/run/secrets/public-models.json`. It has Serein's `models`, `upstreams`, and `assignments` fields. Only selected model connections are copied to each isolated database; personal identity, memories, features and deployment settings are not imported. Assign `embedding` and `reranker` to the desired public providers. Their non-generative models stay selected in both profiles. Without this file the adapter can still use the public Event pipeline and lexical retrieval, but cannot claim semantic coverage.
+
+For development, set `SEREIN_AML_PROFILE=development` and provide that file. The configured `track_router`, `event_curator`, `event_writer`, `writer` and `narrative_scout` assignments are used; missing roles fall back to the selected Writer. Development rejects `gpt-4o-mini`. Before the final local acceptance test, switch to `competition` and use a **new, empty** `SEREIN_AML_DATA_DIR`. Reusing a profiled database with different models is rejected by both Add and Search. Search checks the actual database model assignments and descriptors against the profile as well as its saved marker; changing them cannot silently cross profiles or reuse another embedding profile. A missing active Search model fails instead of falling back to mini. Development-generated memories cannot enter a competition run.
 
 Optional:
 
@@ -67,9 +79,12 @@ Optional:
 -e SEREIN_AML_RETURN_CAP=40
 -e SEREIN_AML_CONTEXT_CHAR_CAP=24000
 -e SEREIN_AML_EXPAND_ARCS=1
+-e SEREIN_AML_ORGANIZE_ARCS=1
 ```
 
 The formal AML request may use `top_k=100`; the local return cap can be tuned up to 100 while always respecting the requested maximum. The context cap counts characters across all returned `content` fields, not tokens. Set `SEREIN_AML_EXPAND_ARCS=1` to enable menu selection; it is disabled by default and never reads a whole volume implicitly. The retrieval model may decline to expand any menu. Invalid or changed selections are ignored.
+
+Semantic lookup uses the public theme-discovery candidate floor of 0.3 cosine. Final reranking considers at most 100 admitted candidates, including explicitly chosen Arc materials. This is a candidate threshold, not a calibrated relevance claim. Preparing routes and vectors for the first Add can be slow; provision caller timeouts accordingly. Add remains pending if the Event pipeline, index fill or enabled Scout fails, and the same `request_id` can be retried without duplicating archived originals.
 
 ## Test
 

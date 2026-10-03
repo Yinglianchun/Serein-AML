@@ -2,6 +2,7 @@
 .venv
 .runtime
 .local
+.aml-data
 data
 **/node_modules
 **/dist

@@ -72,6 +72,20 @@ def test_arc_expansion_is_opt_in(memories, monkeypatch):
     assert [row["id"] for row in search()] == ["event_seed"]
 
 
+@pytest.mark.parametrize('registry', [False, True])
+def test_collecting_arc_offers_materials_but_not_empty_narrative_body(memories, monkeypatch, registry):
+    with Store(memories.database) as store:
+        path, value = ('$.legacy_registry', '{"publication_status":"collecting","arc_key":"equipment"}') if registry else ('$.publication_status', '"collecting"')
+        store.conn.execute("UPDATE revisions SET metadata_json=json_set(metadata_json,?,json(?)) "
+                           "WHERE document_id='narrative_equipment'", (path, value))
+    def choose(prompt):
+        menus = json.loads(prompt.split("MENUS:\n", 1)[1])
+        assert all(item['index'] != 0 for menu in menus for item in menu['materials'])
+        return select_factory(prompt)
+    monkeypatch.setattr(engine, '_model_json', choose)
+    assert {row['id'] for row in search()} == {'event_seed', 'event_factory'}
+
+
 def test_public_recall_domain_rules_are_used_instead_of_raw_fts(memories, monkeypatch):
     monkeypatch.setattr(engine, "_EXPAND_ARCS", False)
     with Store(memories.database) as store:
