@@ -21,7 +21,14 @@ from evals.quality_fixture import fixture
 
 
 def phrase_present(text, phrase):
-    pattern = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in phrase.split()) + r"(?!\w)"
+    if any("\u4e00" <= character <= "\u9fff" for character in phrase):
+        # Public authoring may translate prose and add spaces inside Chinese
+        # dates. Keep entire numeral tokens intact (May 2 cannot match May 20).
+        tokens = re.findall(r"[A-Za-z0-9_]+|[^\s]", phrase)
+        pattern = r"(?<![A-Za-z0-9_])" + r"\s*".join(re.escape(token) for token in tokens) + r"(?![A-Za-z0-9_])"
+    else:
+        # ASCII names may be embedded directly in Chinese authored sentences.
+        pattern = r"(?<![A-Za-z0-9_])" + r"\s+".join(re.escape(part) for part in phrase.split()) + r"(?![A-Za-z0-9_])"
     return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
 
@@ -44,6 +51,37 @@ def measure(case, rows):
             "distractor_units": {name: ids for name, ids in distractors.items() if ids},
             "unmatched_records": [row["id"] for row in rows if row["id"] not in useful],
             "returned_records": len(rows), "context_characters": sum(len(row["content"]) for row in rows)}
+
+
+def summarize(results, count):
+    return {mode: {"fully_covered_cases": sum(item["complete_literal_coverage"] for item in results if item["mode"] == mode),
+                   "cases": count,
+                   "mean_coverage": sum(item["coverage"] for item in results if item["mode"] == mode) / count,
+                   "context_characters": sum(item["context_characters"] for item in results if item["mode"] == mode)}
+            for mode in ("base", "materials", "volumes")}
+
+
+def rescore(report):
+    """Recheck saved synthetic text only; keep the original measures visible."""
+    cases = {case["id"]: case for case in fixture()[1]}
+    expected = {(key, mode) for key in cases for mode in ("base", "materials", "volumes")}
+    pairs = [(item["case"], item["mode"]) for item in report["results"]]
+    if len(pairs) != len(expected) or set(pairs) != expected:
+        raise ValueError("Rescoring requires one complete result per synthetic case and mode")
+    if report.get("kind") != "synthetic_literal_evidence_ablation":
+        raise ValueError("Only this probe's synthetic report can be rescored")
+    for item in report["results"]:
+        metrics = measure(cases[item["case"]], item["rows"])
+        item.setdefault("initial_literal_measure", {key: item[key] for key in metrics})
+        item.update(metrics)
+    report.setdefault("initial_summary", report["summary"])
+    report["summary"] = summarize(report["results"], len(cases))
+    bodies = [row for row in report["memory_inventory"] if row["kind"] == "narrative"]
+    report.setdefault("initial_authored_inventory_coverage", report["authored_inventory_coverage"])
+    report["authored_inventory_coverage"] = {key: measure(case, bodies) for key, case in cases.items()}
+    report["scoring_languages"] = ["en", "zh"]
+    report["rescoring_note"] = "Added Chinese literal equivalents for public authored prose; model calls and returned rows are unchanged. Original measures are retained."
+    return report
 
 
 @contextmanager
@@ -89,7 +127,7 @@ def run(report_path, top_k):
     from serein.compat.narratives import narrative_transaction
     root, complete = engine._DATA_ROOT, model_runtime.complete
     engine._DATA_ROOT = Path(work.name)
-    report = {"kind": "synthetic_literal_evidence_ablation", "profile": "development",
+    report = {"kind": "synthetic_literal_evidence_ablation", "profile": "development", "scoring_languages": ["en", "zh"],
               "transport": os.environ.get("SEREIN_AML_PROBE_TRANSPORT", "configured_api"),
               "top_k": top_k, "entity_expansion": False, "adds": [], "calls": [], "results": [],
               "limitations": ["Literal phrase coverage is not entailment or answer accuracy.",
@@ -152,11 +190,7 @@ def run(report_path, top_k):
         report["guards"] = {"other_user_empty": isolation == [],
                             "result_cap": all(item["returned_records"] <= min(top_k, engine._RETURN_CAP) for item in report["results"]),
                             "context_cap": all(item["context_characters"] <= engine._CONTEXT_CHAR_CAP for item in report["results"])}
-        report["summary"] = {mode: {"fully_covered_cases": sum(item["complete_literal_coverage"] for item in report["results"] if item["mode"] == mode),
-                                   "cases": len(cases),
-                                   "mean_coverage": sum(item["coverage"] for item in report["results"] if item["mode"] == mode) / len(cases),
-                                   "context_characters": sum(item["context_characters"] for item in report["results"] if item["mode"] == mode)}
-                             for mode in ("base", "materials", "volumes")}
+        report["summary"] = summarize(report["results"], len(cases))
         # Missing evidence is a measured result, not a crash; preserve it in the
         # report rather than retrying models until coverage looks better.
         success = all(report["guards"].values())
@@ -184,8 +218,14 @@ def run(report_path, top_k):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, default=Path(".local/quality-report.json"))
+    parser.add_argument("--rescore", type=Path, help="Recheck an existing complete synthetic report without model calls")
     parser.add_argument("--top-k", type=int, default=4)
     args = parser.parse_args()
     if not 1 <= args.top_k <= 100:
         parser.error("top-k must be between 1 and 100")
-    raise SystemExit(0 if run(args.report.resolve(), args.top_k) else 1)
+    if args.rescore:
+        report = rescore(json.loads(args.rescore.read_text(encoding="utf-8")))
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        raise SystemExit(0 if run(args.report.resolve(), args.top_k) else 1)

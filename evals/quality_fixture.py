@@ -54,9 +54,9 @@ def fixture():
     # Each unit is an AND of literal phrases, with alternative spellings per phrase.
     # Probes measure evidence presence, not entailment or generated-answer accuracy.
     affiliation = [["Lin Vale"], ["Oriole Atelier"]]
-    latest = [["Oriole Atelier"], ["Valencia"], ["May 2", "2024-05-02"]]
-    previous = [["Oriole Atelier"], ["Porto"], ["March 11", "2024-03-11"]]
-    cousin = [["Lin Moss"], ["Pineworks"], ["Osaka"]]
+    latest = [["Oriole Atelier"], ["Valencia", "瓦伦西亚"], ["May 2", "2024-05-02", "5月2日"]]
+    previous = [["Oriole Atelier"], ["Porto", "波尔图"], ["March 11", "2024-03-11", "3月11日"]]
+    cousin = [["Lin Moss"], ["Pineworks"], ["Osaka", "大阪"]]
     cases = [
         {"id": "current-work-city", "tags": ["cross-session", "multi-hop", "update", "same-given-name"],
          "query": "As of May 4, which city does Lin Vale work in, and what evidence connects this person to the latest work site?",
@@ -64,18 +64,18 @@ def fixture():
         {"id": "location-chronology", "tags": ["cross-session", "dates", "history"],
          "query": "What were the successive operating cities of Oriole Atelier in March and May, and which city stayed its registered postal address?",
          "required": {"march-site": previous, "may-site": latest,
-                      "registered-address": [["Oriole Atelier"], ["Boston"], ["registered"]]}, "distractors": {"cousin-employment": cousin}},
+                      "registered-address": [["Oriole Atelier"], ["Boston", "波士顿"], ["registered", "注册"]]}, "distractors": {"cousin-employment": cousin}},
         {"id": "open-decision-reason", "tags": ["open-relation", "correction", "negation"],
          "query": "What combination of constraints made me switch my client pottery workshop online, and which earlier explanation did I retract?",
-         "required": {"travel-block": [["train cancellation", "cancelled train", "canceled train"], ["online"]],
-                      "deadline": [["deadline"], ["postponement", "postpone", "launch"]],
-                      "retracted-rain": [["rain"], ["mistaken", "retracted", "retract", "incorrect"]]},
+         "required": {"travel-block": [["train cancellation", "cancelled train", "canceled train", "火车取消"], ["online", "线上"]],
+                      "deadline": [["deadline", "交付期限", "截止日期"], ["postponement", "postpone", "launch", "延期", "上线"]],
+                      "retracted-rain": [["rain", "下雨"], ["mistaken", "retracted", "retract", "incorrect", "误判", "撤回", "错误"]]},
          "distractors": {"cousin-employment": cousin}},
         {"id": "corrected-booking", "tags": ["date", "correction", "noise"],
          "query": "When is my corrected museum train departure in local time, and what does the earlier March 21 date refer to?",
-         "required": {"departure": [["March 22", "2024-03-22"], ["09:10", "9:10"], ["local"]],
-                      "packing": [["March 21", "2024-03-21"], ["pack", "packing"]]},
-         "distractors": {"cousin-trip": [["Lin Moss"], ["March 25", "2024-03-25"]]}},
+         "required": {"departure": [["March 22", "2024-03-22", "3月22日"], ["09:10", "9:10"], ["local", "当地", "本地"]],
+                      "packing": [["March 21", "2024-03-21", "3月21日"], ["pack", "packing", "打包", "收拾"]]},
+         "distractors": {"cousin-trip": [["Lin Moss"], ["March 25", "2024-03-25", "3月25日"]]}},
         {"id": "identity-separation", "tags": ["same-given-name", "identity"],
          "query": "Which employer and city belong to my cousin Lin Moss, rather than Lin Vale?",
          "required": {"cousin-employment": cousin}, "distractors": {"other-employment": affiliation}},

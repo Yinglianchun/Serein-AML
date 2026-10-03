@@ -143,6 +143,10 @@ Phrase coverage is a diagnostic, not semantic entailment, answer accuracy or an
 official AML score. Missing evidence is reported without rerunning models to
 force a better result. API failures stop the run and leave a partial report.
 This small probe does not establish large-history throughput or mini quality.
+Literal probes include English and Chinese equivalents because the public Writer
+may translate source prose, city names and dates. An existing complete synthetic
+report can be checked again without provider calls using `--rescore INPUT.json
+--report OUTPUT.json`; returned text and initial measures remain in the output.
 
 ## Data handling
 

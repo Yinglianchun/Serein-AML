@@ -1,7 +1,7 @@
 """Evidence diagnostics must not turn unrelated matches into a passing chain."""
 import pytest
 
-from evals.quality import measure, phrase_present, retrieval_mode
+from evals.quality import measure, phrase_present, rescore, retrieval_mode, summarize
 from evals.quality_fixture import fixture
 
 
@@ -37,6 +37,8 @@ def test_previous_site_and_same_name_cousin_do_not_fill_latest_site_gap():
     ("NewValencia", "Valencia", False), ("ValenciaEast", "Valencia", False),
     ("May 20", "May 2", False), ("March\n22", "March 22", True),
     ("Lin Vale's", "Lin Vale", True),
+    ("自5月2日起搬迁", "5月2日", True), ("自 5 月 2 日起搬迁", "5月2日", True),
+    ("自5月20日起搬迁", "5月2日", False), ("自15月2日起搬迁", "5月2日", False),
 ])
 def test_literal_phrase_boundaries(text, phrase, expected):
     assert phrase_present(text, phrase) is expected
@@ -83,3 +85,30 @@ def test_ablation_restores_engine_after_failure():
             raise RuntimeError("failed search")
     assert engine._EXPAND_ARCS and engine._EXPAND_ENTITIES
     assert engine._arc_selections is selector
+
+
+def test_chinese_translation_preserves_evidence_units():
+    case = fixture()[1][0]
+    result = measure(case, [row("person", "Lin Vale在Oriole Atelier任职。"),
+                            row("site", "Oriole Atelier自 5 月 2 日起在瓦伦西亚运营。")])
+    assert result["complete_literal_coverage"]
+
+
+def test_rescore_keeps_returned_text_and_original_gaps():
+    cases = fixture()[1]
+    rows = [row("person", "Lin Vale在Oriole Atelier任职。"),
+            row("site", "Oriole Atelier自 5 月 2 日起在瓦伦西亚运营。")]
+    results = [{"case": case["id"], "mode": mode, "rows": rows, **measure(case, [])}
+               for case in cases for mode in ("base", "materials", "volumes")]
+    report = {"kind": "synthetic_literal_evidence_ablation", "results": results,
+              "summary": summarize(results, len(cases)), "memory_inventory": [],
+              "authored_inventory_coverage": {}}
+    reviewed = rescore(report)
+    first = reviewed["results"][0]
+    assert first["complete_literal_coverage"]
+    assert first["initial_literal_measure"]["coverage"] == 0
+    assert first["rows"] is rows
+    assert reviewed["initial_summary"]["base"]["fully_covered_cases"] == 0
+    assert reviewed["summary"]["base"]["fully_covered_cases"] == 1
+    with pytest.raises(ValueError, match="complete result"):
+        rescore({**report, "results": results[:-1]})
