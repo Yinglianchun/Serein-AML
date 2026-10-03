@@ -16,5 +16,5 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install '.[http,background,test]'
-      - run: python -m compileall -q aml
-      - run: pytest -q tests_aml
+      - run: python -m compileall -q aml src/serein
+      - run: pytest -q tests_aml tests

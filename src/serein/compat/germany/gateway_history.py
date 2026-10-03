@@ -3,7 +3,7 @@ import json
 from typing import Any
 class GatewayStateStore:
 
-    def list_injection_debug(self, *, session_id: str='', limit: int=20, include_context: bool=True, before_id: int=0, ids: list[int] | None=None, visible_only: bool=False) -> list[dict[str, Any]]:
+    def list_injection_debug(self, *, session_id: str='', limit: int=20, include_context: bool=True, before_id: int=0, ids: list[int] | None=None, visible_only: bool=False, after_id: int | None=None) -> list[dict[str, Any]]:
         safe_ids: list[int] = []
         for raw_id in ids or []:
             try:
@@ -30,16 +30,21 @@ class GatewayStateStore:
             where.append("(CASE WHEN json_valid(payload_json)=0 THEN 1 "
                          "WHEN json_extract(payload_json,'$.observation_version') IS NULL THEN 1 "
                          "WHEN json_extract(payload_json,'$.request_kind')='user_turn' "
-                         "AND json_extract(payload_json,'$.request_status')='completed' THEN 1 ELSE 0 END)=1")
+                         "THEN 1 ELSE 0 END)=1")
+        ascending = after_id is not None and not safe_ids
+        if ascending:
+            where.append('id > ?')
+            params.append(max(0, int(after_id)))
         if safe_ids:
             where.append(f"id IN ({','.join(('?' for _ in safe_ids))})")
             params.extend(safe_ids)
         elif safe_before_id:
             where.append('id < ?')
             params.append(safe_before_id)
+        order = 'ASC' if ascending else 'DESC'
         where_sql = f"WHERE {' AND '.join(where)}" if where else ''
         params.append(limit)
-        rows = conn.execute(f'\n            SELECT id, session_id, round_id, created_at, payload_json\n            FROM injection_debug\n            {where_sql}\n            ORDER BY id DESC\n            LIMIT ?\n            ', params).fetchall()
+        rows = conn.execute(f'\n            SELECT id, session_id, round_id, created_at, payload_json\n            FROM injection_debug\n            {where_sql}\n            ORDER BY id {order}\n            LIMIT ?\n            ', params).fetchall()
         conn.close()
         items: list[dict[str, Any]] = []
         for row in rows:

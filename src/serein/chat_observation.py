@@ -23,7 +23,8 @@ class ChatObservation:
         self.payload = {}
 
     def start(self, window_id, query, memory_enabled):
-        self.payload = {'observation_version': 1, 'receipt_id': self.receipt_id,
+        self.payload = {'observation_version': 1, 'observation_revision': 1,
+                        'updated_at': now(), 'receipt_id': self.receipt_id,
                         'reported_by': 'serein_chat_proxy', 'query': query,
                         'request_kind': 'user_turn' if query else 'tool_continuation',
                         'memory_enabled': memory_enabled, 'request_status': 'preparing',
@@ -45,19 +46,19 @@ class ChatObservation:
     def finish(self, status, *, reason=''):
         if self.id is None or self.payload.get('request_status') in ('completed', 'failed', 'interrupted'):
             return
-        if status != 'completed':
-            with Store(self.database) as store, store.transaction():
-                store.conn.execute('DELETE FROM injection_debug WHERE id=?', (self.id,))
-            self.id = None
-            return
-        self.payload.update(request_status=status, completed_at=now(), failure_reason=reason,
-                            injected_bucket_ids=self.payload['prepared_ids'] if status == 'completed' else [])
+        # Diagnostics survive failures; they are never successful-delivery receipts.
+        self.payload.update(request_status=status, ended_at=now(), failure_reason=reason,
+                            injected_bucket_ids=list(self.payload['prepared_ids']) if status == 'completed' else [])
         if status == 'completed':
-            self.payload['recall_why_summary'] = {'injected': self.payload.get('prepared_items', [])}
+            self.payload['completed_at'] = self.payload['ended_at']
+        self.payload['recall_why_summary'] = {
+            'injected': self.payload.get('prepared_items', []) if status == 'completed' else []}
         self._save()
 
     def _save(self):
         if self.id is None:
             return
+        self.payload['observation_revision'] = self.payload.get('observation_revision', 0) + 1
+        self.payload['updated_at'] = now()
         with Store(self.database) as store, store.transaction():
             store.conn.execute('UPDATE injection_debug SET payload_json=? WHERE id=?', (encode(self.payload), self.id))

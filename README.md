@@ -2,7 +2,15 @@
 
 Serein adapted for the **Agent Memory Leaderboard (Cycle 2, Textual Memory)**.
 
-This repository starts from Serein commit `0bc2c64cf382193cd959c5e29ca1131a78297365` and keeps the competition changes separate and auditable.
+This repository imports the published Serein backend from commit `b5b13800ad086ea763afd9008ef3bdbfbb83c75b` (public release `0.1.0-rc65`) and keeps the competition changes separate and auditable.
+
+## Public backend baseline
+
+The 232 files under `src/serein/` match that fixed upstream commit. The import includes Event continuation and evidence handling, recoverable processing stages, grounded narrative candidate discovery, diary search, and separate Event/Scene domain rules. The import scope and selected upstream regression tests are recorded in [`upstream-serein.json`](upstream-serein.json).
+
+The cached-image transcription regression is aligned with the current append-only writer contract: an extension reads new sources, while prior image transcriptions remain cached and bound to the existing Event.
+
+The AML adapter remains a separate retrieval path. Updating the backend does not enable semantic/vector retrieval or reranking in AML Search. This repository carries the backend needed by the API; the Serein web application remains in the original project.
 
 ## What changes for AML
 
@@ -20,7 +28,7 @@ The AML adapter therefore uses a separate path:
 - does not apply Serein's normal route-skip, cooldown, or two-card surfacing cap;
 - returns the fixed AML `{"data": [...]}` schema and never exceeds `top_k`.
 
-This is an initial competition baseline. Semantic/vector retrieval and stronger relation composition can be added after Smoke results without changing the public API contract.
+The AML retrieval path remains the initial competition baseline. Semantic/vector retrieval and stronger relation composition are separate follow-up work that can preserve the public API contract.
 
 ## API
 
@@ -61,7 +69,7 @@ The formal AML request may use `top_k=100`; the local return cap can be tuned up
 
 ```bash
 python -m pip install '.[http,background,test]'
-pytest -q tests_aml
+pytest -q tests_aml tests
 ```
 
 ## Data handling
@@ -74,8 +82,10 @@ Do not use AML evaluation payloads for training, fine-tuning, dataset reconstruc
 
 Original project: [Yinglianchun/Serein](https://github.com/Yinglianchun/Serein), same maintainer/team.
 
-Imported baseline: `0bc2c64cf382193cd959c5e29ca1131a78297365`.
+Current imported baseline: [`b5b13800ad086ea763afd9008ef3bdbfbb83c75b`](https://github.com/Yinglianchun/Serein/tree/b5b13800ad086ea763afd9008ef3bdbfbb83c75b).
 
-AML-specific changes live in `aml/`, `Dockerfile.aml`, `requirements-aml.txt`, and `tests_aml/`.
+Original bootstrap baseline: `0bc2c64cf382193cd959c5e29ca1131a78297365`.
+
+AML-specific changes live in `aml/`, `Dockerfile.aml`, `requirements-aml.txt`, and `tests_aml/`. The pytest settings in `pyproject.toml` include both regression suites and make the root-level AML package importable; CI runs both suites.
 
 Official competition/API documentation: https://agentmemoryleaderboard.ai/

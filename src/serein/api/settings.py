@@ -131,18 +131,20 @@ class DomainEntry(BaseModel):
 
 class TaggingPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    domains: list[DomainEntry] = Field(max_length=50)
+    domains: list[DomainEntry] | None = Field(default=None, max_length=50)
+    policies: dict[Literal['event', 'scene'], dict[str, Literal['normal', 'explicit_only', 'excluded']]] | None = None
 
     @field_validator('domains')
     @classmethod
     def unique_domains(cls, value):
-        if len({item.key for item in value}) != len(value):
+        if value is not None and len({item.key for item in value}) != len(value):
             raise ValueError('Domain keys must be unique')
         return value
 
 
 class ResumePatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    mode: Literal['command','mcp'] | None = None
     latest_shadow: bool | None = None
     recent_events: bool | None = None
     favorite_scenes: bool | None = None
@@ -187,6 +189,11 @@ class PipelinePatch(BaseModel):
     max_prompt_chars: int | None = Field(default=None,ge=8000,le=4000000)
     timeout_seconds: int | None = Field(default=None,ge=30,le=1800)
     event_writer_concurrency: int | None = Field(default=None,ge=1,le=8,strict=True)
+    track_lookback_days: int | None = Field(default=None,ge=1,le=365,strict=True)
+    joint_review_enabled: bool | None = None
+    material_review_enabled: bool | None = None
+    round_gate_enabled: bool | None = None
+    append_protected_enabled: bool | None = None
 
 
 class RecallPatch(BaseModel):
@@ -208,6 +215,7 @@ class RecallPatch(BaseModel):
 class SettingsPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     expected_version: int | None = Field(default=None,ge=0)
+    expected_tagging_version: int | None = Field(default=None,ge=1,strict=True)
     identity: IdentityPatch | None = None
     upstream: UpstreamPatch | None = None
     models: list[ModelEntry] | None = Field(default=None, max_length=50)
@@ -259,15 +267,113 @@ class SettingsPatch(BaseModel):
         return value
 
 
+def _link_candidates(conn, kind, query='', date_filter='', offset=0, limit=30, ids=None):
+    """Read-only, paginated title/body lookup; never invoke semantic recall or a writer."""
+    import re
+    from datetime import datetime, timezone
+
+    if kind not in {'event', 'scene', 'diary', 'darkroom', 'upload'}:
+        raise ValueError('Choose one material kind')
+    if len(query) > 200 or offset < 0 or not 1 <= limit <= 50:
+        raise ValueError('Invalid candidate search bounds')
+    terms = list(dict.fromkeys(query.casefold().split()))
+    needle = query.strip().casefold()
+    clock = datetime.now(timezone.utc)
+
+    def unlocked(value):
+        if not value:
+            return True
+        try:
+            when = datetime.fromisoformat(value)
+            return when.tzinfo is not None and when <= clock
+        except (TypeError, ValueError):
+            return False
+
+    def rank(identifier, title, body):
+        identifier, title, body = (str(value or '').casefold() for value in (identifier, title, body))
+        if not terms:
+            return 1
+        if needle == identifier:
+            return 4
+        if needle == title:
+            return 3
+        if all(term in title for term in terms):
+            return 2
+        return int(all(term in identifier or term in title or term in body for term in terms))
+
+    conn.create_function('link_candidate_rank', 3, rank, deterministic=True)
+    conn.create_function('link_candidate_unlocked', 1, unlocked, deterministic=True)
+    if kind in {'event', 'scene'}:
+        source = """SELECT d.id,r.title,r.body_md,
+            COALESCE(NULLIF(json_extract(r.metadata_json,'$.date'),''),
+                     NULLIF(json_extract(r.metadata_json,'$.local_date'),''),d.created_at) AS date
+            FROM documents d JOIN revisions r ON r.document_id=d.id AND r.number=d.revision
+            WHERE d.kind=? AND d.lifecycle='active'
+              AND NOT EXISTS (SELECT 1 FROM deletions WHERE document_id=d.id)"""
+        args = [kind]
+    elif kind in {'diary', 'darkroom'}:
+        # Match notebook.resolve_entry's visibility/clock boundary before returning
+        # titles, snippets OR counts. Merely searching must never unlock an entry.
+        source = """SELECT CAST(id AS TEXT) AS id,title,body_md,day AS date
+            FROM diary_entries WHERE kind=? AND visibility='active'
+              AND COALESCE(deleted_at,'')='' AND link_candidate_unlocked(unlock_at)"""
+        args = [kind]
+    else:
+        # Do not read import_records.content: a file search only needs metadata.
+        source = """SELECT u.id,json_extract(u.metadata_json,'$.filename') AS title,
+            COALESCE(json_extract(u.metadata_json,'$.extracted_text'),'') AS body_md,
+            COALESCE(json_extract(u.metadata_json,'$.created_at'),'') AS date
+            FROM narrative_uploads u JOIN import_records r ON r.origin=u.origin AND r.path=u.path
+            WHERE NOT EXISTS (SELECT 1 FROM deletions WHERE document_id=u.id)"""
+        args = []
+    clauses = ['score>0']
+    if date_filter:
+        clauses.append('substr(date,1,10)=?')
+        args.append(date_filter)
+    if ids is not None:
+        if not ids:
+            return {'purpose':'link', 'items':[], 'total':0, 'offset':offset, 'has_more':False}
+        clauses.append('id IN (' + ','.join('?' for _ in ids) + ')')
+        args.extend(str(identifier) for identifier in ids)
+    common = ('WITH candidates AS (' + source + '), ranked AS ('
+              'SELECT *,link_candidate_rank(id,title,body_md) AS score FROM candidates) ')
+    where = ' FROM ranked WHERE ' + ' AND '.join(clauses)
+    total = conn.execute(common + 'SELECT COUNT(*)' + where, args).fetchone()[0]
+    rows = conn.execute(common + 'SELECT id,title,body_md,date' + where +
+                        ' ORDER BY score DESC,date DESC,id DESC LIMIT ? OFFSET ?',
+                        [*args, limit, offset]).fetchall()
+    items = []
+    for row in rows:
+        text = re.sub(r'\s+', ' ', str(row['body_md'] or '')).strip()
+        positions = [text.casefold().find(term) for term in terms]
+        position = min((value for value in positions if value >= 0), default=0)
+        start = max(0, position - 40)
+        excerpt = ('…' if start else '') + text[start:start + 180]
+        if start + 180 < len(text):
+            excerpt += '…'
+        items.append({'id':str(row['id']), 'kind':kind, 'title':row['title'] or '未命名',
+                      'date':str(row['date'] or '')[:10], 'excerpt':excerpt})
+    return {'purpose':'link', 'items':items, 'total':total, 'offset':offset,
+            'has_more':offset + len(items) < total}
+
+
 def routes(settings, auth):
     router = APIRouter(dependencies=auth)
     from ..configured_models import memory_ready, memory_status, prepare_selected
 
     @router.get('/v1/settings/resume-candidates')
-    def resume_candidates(kind: Literal['event','scene',''] = 'event', q: str = Query('',max_length=200),
+    def resume_candidates(response: Response, kind: Literal['event','scene','diary','darkroom','upload',''] = 'event', q: str = Query('',max_length=200),
                           date: str = '', offset: int = Query(0,ge=0), limit: int = Query(30,ge=1,le=50),
-                          ids: list[str] | None = Query(None,max_length=200)):
+                          ids: list[str] | None = Query(None,max_length=200),
+                          purpose: Literal['resume','link'] = 'resume'):
         from ..core.store import Store
+        response.headers['Cache-Control']='no-store'
+        if purpose == 'link':
+            if not kind:raise HTTPException(422, '请选择一种材料类型。')
+            with Store(settings.database,read_only=True) as store:
+                return _link_candidates(store.conn,kind,q,date,offset,limit,ids)
+        if kind not in ('event','scene',''):
+            raise HTTPException(422, '续接自选内容仅支持 Event 和 Scene。')
         clauses=["d.lifecycle='active'", "d.kind IN ('event','scene')", "d.id NOT IN (SELECT document_id FROM deletions)"]
         args=[]
         if kind:clauses.append('d.kind=?');args.append(kind)
@@ -326,7 +432,7 @@ def routes(settings, auth):
             state=read_settings(settings.database)
             domains=state['tagging']['domains']
             return {'ok':True,'active':True,'dataset_version':state['tagging_version'],
-                    'policies':domains,'deployment_state':'instance'}
+                    'policies':domains,'rules':state['tagging'].get('policies',{}),'deployment_state':'instance'}
 
         @router.post('/api/semantic-recall/domain-policies/publish')
         def save_domains(body:dict):
@@ -347,7 +453,12 @@ def routes(settings, auth):
                     patch=TaggingPatch(domains=[{**item,'policy':by_key[item['key']]} for item in current['policies']])
             except (ValidationError, KeyError, TypeError):
                 raise HTTPException(400,'Invalid domain catalog')
-            save_settings(settings.database,{'tagging':patch.model_dump()})
+            from ..core.store import Conflict
+            try:
+                save_settings(settings.database,{'tagging':patch.model_dump(exclude_none=True),
+                    'expected_tagging_version':body['expected_dataset_version']})
+            except Conflict:
+                raise HTTPException(409,'domain_policy_publish_version_conflict') from None
             return read_domains()
 
     class TemplateInput(BaseModel):

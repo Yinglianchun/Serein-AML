@@ -30,5 +30,5 @@ where = ["src"]
 "serein.compat.germany" = ["PROVENANCE.md"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_aml"]
 pythonpath = ["src", "."]

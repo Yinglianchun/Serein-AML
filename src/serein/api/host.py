@@ -26,18 +26,30 @@ def routes(settings, auth):
         return {'status':'recorded','reported_by':'host','delivered_ids':body['delivered_ids']}
 
     @router.get('/v1/host/deliveries')
-    def history(limit:int=Query(80,ge=1,le=200),before_id:int=0):
+    def history(limit:int=Query(80,ge=1,le=200),before_id:int=0,
+                after_id:int | None=Query(None,ge=0),review_ids:str=''):
+        if after_id is not None and before_id:
+            raise HTTPException(400, 'Use either before_id or after_id')
+        ids=list(dict.fromkeys(int(value) for value in review_ids.split(',') if value.isdigit() and int(value)>0))[:500]
         with Store(settings.database,read_only=True) as store:
-            rows=store.conn.execute('SELECT * FROM host_deliveries WHERE (?=0 OR id<?) ORDER BY id DESC LIMIT ?',
-                (before_id,before_id,limit+1)).fetchall()
-        items=[]
-        for row in rows[:limit]:
+            if after_id is not None:
+                rows=store.conn.execute('SELECT * FROM host_deliveries WHERE id>? ORDER BY id ASC LIMIT ?',
+                    (after_id,limit+1)).fetchall()
+            else:
+                rows=store.conn.execute('SELECT * FROM host_deliveries WHERE (?=0 OR id<?) ORDER BY id DESC LIMIT ?',
+                    (before_id,before_id,limit+1)).fetchall()
+            reviewed=store.conn.execute('SELECT * FROM host_deliveries WHERE id IN ('+','.join('?' for _ in ids)+') ORDER BY id DESC',ids).fetchall() if ids else []
+        def serialize(row):
             payload=json.loads(row['payload'])
-            items.append({'id':row['id'],**payload,'gateway_memory_injected_ids':payload['delivered_ids'],
+            return {'id':row['id'],**payload,'reported_by':payload.get('reported_by','host'),
+                'gateway_memory_injected_ids':payload['delivered_ids'],
                 'hook_memory_outcome':'injected' if payload['delivered_ids'] else 'no_match',
-                'gateway_memory_trigger':'host_acknowledgement','session_id':payload['window_id']})
-        return {'status':'ok','items':items,
-                'has_more':len(rows)>limit,'next_before_id':rows[min(limit,len(rows))-1]['id'] if rows else 0}
+                'gateway_memory_trigger':'host_acknowledgement','session_id':payload['window_id']}
+        items=[serialize(row) for row in rows[:limit]]
+        next_id=items[-1]['id'] if items else 0
+        return {'status':'ok','items':items,'has_more':len(rows)>limit,'next_before_id':next_id,
+            **({'reviewed_items':[serialize(row) for row in reviewed if row['id'] not in {item['id'] for item in items}]} if ids else {}),
+            **({'next_after_id':next_id or after_id} if after_id is not None else {})}
 
     @router.post('/v1/host/messages/search')
     def search(body:dict):

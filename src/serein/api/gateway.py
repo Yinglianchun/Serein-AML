@@ -11,17 +11,22 @@ def routes(services,auth):
     router=APIRouter(dependencies=auth)
 
     @router.get('/api/gateway-injections')
-    def history(session_id:str='',limit:int=20,before_id:int=0,review_ids:str='',include_context:bool=False):
+    def history(session_id:str='',limit:int=20,before_id:int=0,review_ids:str='',include_context:bool=False,
+                after_id:int | None=None):
         from ..compat.gateway_history import GatewayHistory
+        if after_id is not None and (after_id < 0 or before_id):
+            raise HTTPException(400, 'Use either before_id or nonnegative after_id')
         store=GatewayHistory(services._settings.database)
         limit=max(1,min(100,limit))
-        rows=store.list_injection_debug(session_id=session_id,limit=limit+1,before_id=before_id,include_context=include_context,visible_only=True)
+        rows=store.list_injection_debug(session_id=session_id,limit=limit+1,before_id=before_id,
+            after_id=after_id,include_context=include_context,visible_only=True)
         items=rows[:limit]
-        ids=[int(value) for value in review_ids.split(',') if value.isdigit() and int(value)>0][:500]
+        ids=list(dict.fromkeys(int(value) for value in review_ids.split(',') if value.isdigit() and int(value)>0))[:500]
         reviewed=store.list_injection_debug(session_id=session_id,ids=ids,limit=len(ids),include_context=include_context,visible_only=True) if ids else []
         next_id=items[-1]['id'] if items else None
         return {'status':'ok','items':items,'reviewed_items':[row for row in reviewed if row['id'] not in {item['id'] for item in items}],
-            'has_more':len(rows)>limit,'next_before_id':next_id,'next_cursor':str(next_id) if next_id else None}
+            'has_more':len(rows)>limit,'next_before_id':next_id,'next_cursor':str(next_id) if next_id else None,
+            **({'next_after_id':next_id if next_id is not None else after_id} if after_id is not None else {})}
 
     @router.post('/api/hook/recall')
     def recall(body: dict):
