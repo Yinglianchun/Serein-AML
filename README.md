@@ -86,6 +86,29 @@ menu expansion and at most two decision calls, with no additional retrieval loop
 or generated answer. Model judgments still do not prove semantic entailment.
 This Search-only flag does not alter stored memory or the ingestion profile.
 
+`SEREIN_AML_EXPAND_GAPS=1` extends that same assessment with at most two short
+queries for gaps not covered by a selected menu item. It also works when no Arc
+menu exists, and implies evidence assessment/joint review without requiring
+`SEREIN_AML_PLAN_ARCS`. Enable `SEREIN_AML_EXPAND_ARCS=1` as well to offer menus.
+Each query must name an entity literally present in an exact visible anchor
+quote, and retain its missing relationship and time conditions. Queries are
+retrieval hints, never stored facts. The host uses the public `recall_memory`
+service and pending-original lookup, ranks against each bridge query, and
+proposes at most one new related candidate for the shared joint review. If the
+relation query finds no new entity-bearing candidate, a bounded literal-name
+fallback supplies candidates still ranked and reviewed against that gap. Exact
+accepted quotes from both anchor and candidate must contain the bridge name.
+Only accepted, still-current evidence earns paired result slots. No new hit
+seeds another search round. This route replaces the pre-assessment entity-rule
+expansion when both flags are enabled; enough evidence stops before expansion.
+There are still at most two expansion decision calls (assess/plan, then review),
+in addition to the existing initial query-rewrite call. All flags remain opt-in.
+
+Develop retrieval behavior using invented histories and held-out synthetic
+questions, comparing coverage, noise and runtime. Official Smoke is a separate
+compatibility check for synchronous Add/Search and scoring; it is not a
+retrieval-development dataset. Respect the official evaluation-data restrictions.
+
 ## API
 
 - `GET /health` — unauthenticated health endpoint.

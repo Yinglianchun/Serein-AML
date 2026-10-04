@@ -89,9 +89,11 @@ def retrieval_mode(engine, mode, trace):
     # Evaluation-only ablation, one search at a time. Writer/tagger/profile and
     # raw-original fallback stay identical. Never force the model's selections.
     expand, entities, chooser = engine._EXPAND_ARCS, engine._EXPAND_ENTITIES, engine._arc_selections
+    gaps = engine._EXPAND_GAPS
     planner = engine.arc_planning.choose
     engine._EXPAND_ARCS = mode != "base"
     engine._EXPAND_ENTITIES = False
+    engine._EXPAND_GAPS = False  # This ablation isolates menus, not planned searches.
 
     def visible_menus(menus):
         return {key: {**menu, "materials": [item for item in menu["materials"]
@@ -119,6 +121,7 @@ def retrieval_mode(engine, mode, trace):
     finally:
         engine._EXPAND_ARCS, engine._EXPAND_ENTITIES, engine._arc_selections = expand, entities, chooser
         engine.arc_planning.choose = planner
+        engine._EXPAND_GAPS = gaps
 
 
 def run(report_path, top_k):

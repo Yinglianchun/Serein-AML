@@ -61,31 +61,31 @@ def test_material_ablation_hides_volume_without_forcing_model_picks():
         seen.append(menus)
         return [("work", [2])]
 
-    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _arc_selections=selector,
+    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _EXPAND_GAPS=True, _arc_selections=selector,
                              arc_planning=SimpleNamespace(choose=lambda *_: []))
     menu = {"work": {"title": "Work", "materials": [{"index": 0, "id": "roll"},
                                                       {"index": 2, "id": "event"}]}}
     trace = []
     with retrieval_mode(engine, "materials", trace):
-        assert engine._EXPAND_ARCS and not engine._EXPAND_ENTITIES
+        assert engine._EXPAND_ARCS and not engine._EXPAND_ENTITIES and not engine._EXPAND_GAPS
         assert engine._arc_selections("question", None, menu) == [("work", [2])]
         assert seen[0]["work"]["materials"] == [{"index": 2, "id": "event"}]
     assert menu["work"]["materials"][0]["index"] == 0
     assert trace == [{"arc_key": "work", "picks": [2], "selected_ids": ["event"]}]
     assert engine._arc_selections is selector
-    assert not engine._EXPAND_ARCS and engine._EXPAND_ENTITIES
+    assert not engine._EXPAND_ARCS and engine._EXPAND_ENTITIES and engine._EXPAND_GAPS
 
 
 def test_ablation_restores_engine_after_failure():
     from types import SimpleNamespace
     selector = lambda *_: []
-    engine = SimpleNamespace(_EXPAND_ARCS=True, _EXPAND_ENTITIES=True, _arc_selections=selector,
+    engine = SimpleNamespace(_EXPAND_ARCS=True, _EXPAND_ENTITIES=True, _EXPAND_GAPS=True, _arc_selections=selector,
                              arc_planning=SimpleNamespace(choose=lambda *_: []))
     with pytest.raises(RuntimeError):
         with retrieval_mode(engine, "base", []):
             assert not engine._EXPAND_ARCS
             raise RuntimeError("failed search")
-    assert engine._EXPAND_ARCS and engine._EXPAND_ENTITIES
+    assert engine._EXPAND_ARCS and engine._EXPAND_ENTITIES and engine._EXPAND_GAPS
     assert engine._arc_selections is selector
 
 
@@ -95,7 +95,7 @@ def test_planned_material_ablation_keeps_current_evidence_and_hides_volume():
     def planner(model, query, options, evidence, menus):
         seen.append((evidence, menus))
         return [{"arc_key": "work", "picks": [2], "missing": "A work location"}]
-    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _arc_selections=lambda *_: [],
+    engine = SimpleNamespace(_EXPAND_ARCS=False, _EXPAND_ENTITIES=True, _EXPAND_GAPS=True, _arc_selections=lambda *_: [],
                              arc_planning=SimpleNamespace(choose=planner))
     evidence = [{"ref": "anchor", "text": "Current evidence"}]
     menus = {"work": {"title": "Work", "materials": [{"index": 0, "id": "roll"}, {"index": 2, "id": "event"}]}}

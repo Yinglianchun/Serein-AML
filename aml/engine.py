@@ -40,6 +40,7 @@ _CONTEXT_CHAR_CAP = max(1000, int(os.getenv("SEREIN_AML_CONTEXT_CHAR_CAP", "2400
 _EXPAND_ARCS = os.getenv("SEREIN_AML_EXPAND_ARCS", "0") == "1"
 _PLAN_ARCS = os.getenv("SEREIN_AML_PLAN_ARCS", "0") == "1"
 _EXPAND_ENTITIES = os.getenv("SEREIN_AML_EXPAND_ENTITIES", "0") == "1"
+_EXPAND_GAPS = os.getenv("SEREIN_AML_EXPAND_GAPS", "0") == "1"
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -400,6 +401,46 @@ def _planning_evidence(prepared, query, candidates, scores, top_k, groups):
     return evidence
 
 
+def _gap_candidate(services, prepared, query, searches, candidates):
+    """Retrieve once from grounded plans; propose at most one joint-review candidate."""
+    choices = []
+    for position, plan in enumerate(searches[:2]):
+        anchor = candidates.get(plan["anchor"])
+        if not anchor:
+            continue
+        current = _planning_evidence(prepared, query, {anchor["id"]: anchor}, {anchor["id"]: 1}, 1, [])
+        if not current or plan["anchor_quote"] not in current[0]["text"]:
+            continue
+        found = {}
+        if prepared.embedding:
+            found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="semantic"))
+        found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="lexical"))
+        found.update((hit["id"], hit) for hit in originals.hits(prepared, plan["query"], [plan["query"]], limit=20))
+        if not any(key not in candidates and hit["kind"] in {"event", "scene", "original"}
+                   and plan["entity"] in bridges.text(hit) for key, hit in found.items()):
+            # Natural relation queries may have no conjunctive lexical match.
+            # A bounded literal-name fallback still ranks/reviews against the gap.
+            found.update((hit["id"], hit) for hit in _recall_hits(services, plan["entity"], limit=20, method="lexical"))
+            found.update((hit["id"], hit) for hit in originals.hits(prepared, plan["entity"], [plan["entity"]], limit=20))
+        pool = {key: hit for key, hit in found.items() if key not in candidates and
+                hit["kind"] in {"event", "scene", "original"} and plan["entity"] in bridges.text(hit)}
+        # Apply public readability, domain, revision and pending-original checks
+        # before any excluded text reaches the reranker or joint reviewer.
+        pool = {key: hit for key, hit in pool.items() if _planning_evidence(
+            prepared, query, {key: hit}, {key: 1}, 1, [])}
+        pool = dict(list(pool.items())[:40])
+        ranked = _rank_scores(prepared, plan["query"], pool, {key: .01 for key in pool})
+        for key, hit in pool.items():
+            if prepared.reranker and ranked[key] <= .00001:
+                continue
+            choices.append((ranked[key], -position, key, hit, {
+                "ids": (plan["anchor"], key), "route": "planned_gap", "plan": plan}))
+    if not choices:
+        return None
+    best = max(choices, key=lambda item: item[:3])
+    return {"hit": best[3], "group": best[4], "missing": best[4]["plan"]["missing"]}
+
+
 def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
     if not query.strip():
         return []
@@ -437,16 +478,16 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
         direct_ids = set(candidates)
         evidence_groups = []
         planning_scores = None
-        if _EXPAND_ENTITIES:
+        if _EXPAND_ENTITIES and not _EXPAND_GAPS:
             hits, groups = _bridge_candidate(services, prepared, query, [candidates[key] for key in direct])
             add_ranked(hits, .35)
             evidence_groups.extend(groups)
 
-        if _EXPAND_ARCS and candidates:
+        if (_EXPAND_ARCS or _EXPAND_GAPS) and candidates:
             # An expansion is never a seed for another expansion in this Search.
             seeds = arc_seeds
             with Reader(paths.database) as reader:
-                by_owner, menus = _arcs(reader, [candidates[item] for item in seeds if candidates[item]['kind'] != 'original'])
+                by_owner, menus = _arcs(reader, [candidates[item] for item in seeds if candidates[item]['kind'] != 'original']) if _EXPAND_ARCS else ({}, {})
                 anchors = {key: next(owner for owner in seeds if any(card['arc_key'] == key
                            for card in by_owner.get(owner, []))) for key in menus}
                 for menu in menus.values():
@@ -456,9 +497,11 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     if metadata.get("legacy_registry", metadata).get("publication_status") == "collecting":
                         menu["materials"] = [item for item in menu["materials"] if item["index"] != 0]
             menus = dict(list(menus.items())[:3])
-            if menus:
+            if menus or _EXPAND_GAPS:
                 evidence = []
-                if _PLAN_ARCS:
+                gap_searches = []
+                planning = _PLAN_ARCS or _EXPAND_GAPS
+                if planning:
                     protected = {key for group in evidence_groups for key in group["ids"]}
                     ids = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
                     ids = list(dict.fromkeys([*ids, *sorted(protected)]))
@@ -466,7 +509,11 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     planning_scores = _rank_scores(prepared, query, pool, {key: scores[key] for key in ids})
                     evidence = _planning_evidence(prepared, query, pool, planning_scores, top_k, evidence_groups)
                     try:
-                        choices = arc_planning.choose(_model_json, query, options, evidence, menus)
+                        if _EXPAND_GAPS:
+                            decision = arc_planning.assess(_model_json, query, options, evidence, menus, allow_search=True)
+                            choices, gap_searches = decision["choices"], decision["searches"]
+                        else:
+                            choices = arc_planning.choose(_model_json, query, options, evidence, menus)
                     except (json.JSONDecodeError, ValueError):
                         choices = []
                 else:
@@ -488,12 +535,16 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     for hit in hits:
                         group = {'ids': (anchors[key], hit['id']), 'route': 'arc_menu',
                                  'arc_key': key, 'menu_fingerprint': page['menu_fingerprint']}
-                        if _PLAN_ARCS:
+                        if planning:
                             pending_reads.append({"hit": hit, "group": group, "missing": choice["missing"]})
                         else:
                             add_ranked([hit], 1.0)
                             evidence_groups.append(group)
-                if _PLAN_ARCS and pending_reads:
+                if gap_searches:
+                    candidate = _gap_candidate(services, prepared, query, gap_searches, candidates)
+                    if candidate:
+                        pending_reads.append(candidate)
+                if planning and pending_reads:
                     # A guessed menu item does not earn reserved result slots.
                     # Inspect the actual text and its anchor together first.
                     reads, eligible = [], {}
@@ -505,23 +556,34 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                             hit, anchor = item["hit"], item["group"]["ids"][0]
                             anchor_evidence = _planning_evidence(prepared, query, {anchor: candidates[anchor]},
                                                                  {anchor: scores[anchor]}, 1, [])
-                            current = reader.read(hit["id"], kind=hit["kind"], with_evidence=False)
-                            doc = current.get("document") or {}
-                            if not anchor_evidence or not current["readable"] or doc.get("revision") != hit["document"].get("revision"):
+                            if not anchor_evidence:
                                 continue
-                            if domain_rejection(doc, original_query, policy) or (hit["kind"] == "narrative" and not
-                                narratives.readable_for_search(prepared, reader, hit["id"], original_query, policy)):
-                                continue
+                            if hit["kind"] == "original":
+                                target = _planning_evidence(prepared, query, {hit["id"]: hit}, {hit["id"]: 1}, 1, [])
+                                if not target:
+                                    continue
+                                title, body = target[0]["title"], hit["content"]
+                            else:
+                                current = reader.read(hit["id"], kind=hit["kind"], with_evidence=False)
+                                doc = current.get("document") or {}
+                                if not current["readable"] or doc.get("revision") != hit["document"].get("revision"):
+                                    continue
+                                if domain_rejection(doc, original_query, policy) or (hit["kind"] == "narrative" and not
+                                    narratives.readable_for_search(prepared, reader, hit["id"], original_query, policy)):
+                                    continue
+                                title, body = doc["title"], doc["body_md"]
                             anchor_view = anchor_evidence[0]
-                            anchor_text = bridges.excerpt(anchor_view["text"], allowance // 3, [])
-                            text = bridges.excerpt(doc["body_md"], allowance-len(anchor_text), [])
+                            focus = item["group"].get("plan", {}).get("anchor_quote")
+                            anchor_text = bridges.excerpt(anchor_view["text"], allowance // 3, [focus] if focus else [])
+                            text = bridges.excerpt(body, allowance-len(anchor_text), [])
                             if not anchor_text.strip() or not text.strip():
                                 continue
                             selection = f"s{index}"
                             reads.append({"selection": selection, "gap": item["missing"],
+                                          "bridge_entity": item["group"].get("plan", {}).get("entity"),
                                           "anchor": {**anchor_view, "text": anchor_text, "truncated": len(anchor_text) < len(anchor_view["text"]) or anchor_view["truncated"]},
-                                          "material": {"ref": hit["id"], "title": doc["title"], "kind": hit["kind"],
-                                                       "text": text, "truncated": len(text) < len(doc["body_md"])}})
+                                          "material": {"ref": hit["id"], "title": title, "kind": hit["kind"],
+                                                       "text": text, "truncated": len(text) < len(body)}})
                             eligible[selection] = item
                     try:
                         accepted = arc_planning.review(_model_json, query, options, evidence, reads)
@@ -530,6 +592,9 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     for selection, support in accepted.items():
                         item = eligible[selection]
                         group = item["group"]
+                        if group["route"] == "planned_gap" and any(group["plan"]["entity"] not in support[key]
+                                for key in ("anchor_quote", "quote")):
+                            continue
                         group["focus"] = {group["ids"][0]: [support["anchor_quote"]], group["ids"][1]: [support["quote"]]}
                         add_ranked([item["hit"]], 1.0)
                         evidence_groups.append(group)
@@ -586,6 +651,11 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     _, stamp = bridges.grounded_entities(reader, candidates[bridge_plan['anchor']])
                     if stamp != bridge_plan['anchor_stamp'] or not bridges.matching_quote(
                             bridge_plan, candidates[group['ids'][1]]):
+                        continue
+                elif group['route'] == 'planned_gap':
+                    plan = group['plan']
+                    if plan['entity'] not in records[group['ids'][1]]['content'] or plan['anchor_quote'] not in records[plan['anchor']]['content'] or any(
+                            quote not in records[key]['content'] for key, quotes in group['focus'].items() for quote in quotes):
                         continue
                 else:
                     _, current_menus = _arcs(reader, [], arc_key=group['arc_key'])
