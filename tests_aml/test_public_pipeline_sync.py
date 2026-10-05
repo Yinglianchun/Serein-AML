@@ -101,3 +101,42 @@ def test_ordinary_deferred_tail_still_stops_without_repeated_tasks(memory, monke
 def test_aml_bootstrap_does_not_enable_track_candidate_filter(memory):
     settings = runtime.bootstrap(engine._paths("user-a"))
     assert read_settings(settings.database)["pipeline"]["track_candidates_enabled"] is False
+
+
+@pytest.mark.parametrize('repair', [True, False])
+def test_router_requires_assistant_coverage_and_validates_repair(memory, monkeypatch, repair):
+    monkeypatch.setattr(pipeline, 'advance', pipeline.advance.original)
+    current, router_payloads = {}, []
+    stage = runtime.run_stage
+
+    async def run_stage(settings, role, request):
+        current.update(role=role, request=request)
+        return await stage(settings, role, request)
+
+    async def complete(model, payload, **kwargs):
+        role, request = current['role'], current['request']
+        output = role_output(role, request)
+        if role == 'track_router':
+            router_payloads.append(payload)
+            prompt = payload['messages'][1]['content']
+            ids = [row['id'] for row in request['messages']]
+            assert 'including assistant replies' in prompt
+            assert runtime.encode(ids) in prompt
+            if len(router_payloads) == 1 or not repair:
+                output['message_assignments'].pop()
+        return {'choices': [{'message': {'content': json.dumps(output)}}]}
+
+    monkeypatch.setattr(runtime, 'run_stage', run_stage)
+    monkeypatch.setattr('serein.model_runtime.complete', complete)
+    if repair:
+        add()
+    else:
+        with pytest.raises(RuntimeError, match='pipeline did not complete'):
+            add()
+    assert len(router_payloads) == (2 if repair else 3)
+    assert 'omitted source_message_ids=[2]' in router_payloads[1]['messages'][1]['content']
+    with Store(engine._paths('user-a').database, read_only=True) as store:
+        assert store.conn.execute('SELECT count(*) FROM raw_events').fetchone()[0] == 2
+        assert store.conn.execute('SELECT count(*) FROM raw_processing').fetchone()[0] == (2 if repair else 0)
+        assert store.conn.execute('SELECT count(*) FROM documents').fetchone()[0] == (1 if repair else 0)
+        assert store.conn.execute('SELECT status FROM aml_add_receipts').fetchone()[0] == ('complete' if repair else 'pending')

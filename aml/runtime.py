@@ -183,7 +183,16 @@ async def run_stage(settings, role, request):
     config = pipeline.snapshot(settings.database, request['batch_id'])
     model = config['models'][role]
     reminder = ''
-    if role == 'event_curator':
+    if role == 'track_router':
+        reminder = """
+HOST ROUTING COVERAGE (structure only, not a semantic assignment):
+Route EVERY raw_messages_json row, including assistant replies, repeated facts,
+and acknowledgments. Each row needs its own message_assignments entry in input
+order; never combine a user message and its reply into one assignment. Determine
+each Track and routing_role from the original dialogue under the role rules.
+The complete required source_message_id sequence is:
+""" + encode([message['id'] for message in request['messages']])
+    elif role == 'event_curator':
         component = request['component']
         stable = {message['id'] for message in component['messages']}
         roots = sorted({unit['unit_root_message_id'] for unit in component['memberships']
