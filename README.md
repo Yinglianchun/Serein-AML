@@ -234,3 +234,5 @@ Original bootstrap baseline: `0bc2c64cf382193cd959c5e29ca1131a78297365`.
 AML-specific changes live in `aml/`, `Dockerfile.aml`, `requirements-aml.txt`, and `tests_aml/`. The pytest settings in `pyproject.toml` include both regression suites and make the root-level AML package importable; CI runs both suites.
 
 Official competition/API documentation: https://agentmemoryleaderboard.ai/
+
+For text-embedding-v4, initial public route preparation batches the unchanged authored route examples and boundaries as query inputs in groups of at most ten. Query instructions and vector positions remain validated; other embedding models retain individual preparation calls. This reduces the 78 fixed-example requests to eight, plus the dimension probe, without changing recall routes or thresholds.

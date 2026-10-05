@@ -27,6 +27,18 @@ class EmbeddingClient:
         vector = self._request(prepared, 1, client=client)[0]
         return {"query": text, "profile": self.profile, "embedding": vector}
 
+    def queries(self, texts, *, client=None):
+        """Batch v4 query inputs while retaining their query instruction and order."""
+        if self.profile['model'] != 'text-embedding-v4':
+            return [self.query(text, client=client) for text in texts]
+        prepared = [self.prepare(text, self.profile['query_instruction']) for text in texts]
+        vectors = []
+        for offset in range(0, len(prepared), 10):
+            batch = prepared[offset:offset+10]
+            vectors.extend(self._request(batch, len(batch), client=client))
+        return [{'query':text, 'profile':self.profile, 'embedding':vector}
+                for text, vector in zip(texts, vectors)]
+
     def prepare(self, text, instruction, *, kind="Query"):
         if not text.strip() or not self.dimension:
             raise ValueError("Text and a cached embedding dimension are required")

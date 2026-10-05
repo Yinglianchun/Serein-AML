@@ -6,10 +6,11 @@
   "backend_prefix": "src/serein/",
   "backend_file_count": 233,
   "local_overrides": {
-    "src/serein/adapters/embedding.py": "Split text-embedding-v4 document transport into at most ten inputs per request, preserving all inputs and per-request response-position validation; other models retain their existing batch behavior",
+    "src/serein/adapters/embedding.py": "Split text-embedding-v4 document and query transport into at most ten inputs per request, preserving all inputs, query/document instructions and per-request response-position validation; other models retain their existing behavior",
     "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
     "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks",
-    "tests/test_public_features.py": "pin an explicit 10k prompt limit for the no-truncation regression independently of public prompt compaction and the raised 200k default"
+    "tests/test_public_features.py": "pin an explicit 10k prompt limit for the no-truncation regression independently of public prompt compaction and the raised 200k default",
+    "src/serein/semantic_setup.py": "Batch only text-embedding-v4 fixed route examples and boundaries as query inputs, preserving enabled examples, identity rendering, order, route policy and publication; other models retain individual calls"
   },
   "runtime_files": [
     ".dockerignore",
