@@ -76,10 +76,30 @@ def test_public_preview_save_publishes_prose_and_reuses_successful_receipt(autho
     assert "## 绑定材料快照" in row["full_document"]
     assert asyncio.run(narratives.author(settings))["unchanged"] == [row["narrative_id"]]
     assert len(calls) == 1 and current(settings)["revision"] == 2
+    assert [source['ref'] for source in calls[0]['sources']] == ['s1','s2']
+    assert all('material' not in source for source in calls[0]['sources'])
     with Store(settings.database, read_only=True) as store:
         receipt = store.conn.execute("SELECT * FROM aml_narrative_receipts").fetchone()
         assert receipt["saved_revision"] == 2
         assert len(json.loads(receipt["evidence_json"])) == 2
+        assert {paragraph['evidence'][0]['ref'] for paragraph in json.loads(receipt['evidence_json'])} == {
+            'scene:scene_purchase', 'scene:scene_factory'}
+
+
+@pytest.mark.parametrize('change', ['unknown_alias', 'wrong_source_quote', 'missing_material'])
+def test_short_source_refs_do_not_relax_original_grounding(change):
+    sources = [{'ref':'event:a/message/0','material':'event:a','text':'Dana joined AsterBridge.'},
+               {'ref':'event:b/message/1','material':'event:b','text':'AsterBridge is in CopperBay.'}]
+    refs = {'s1':sources[0]['ref'],'s2':sources[1]['ref']}
+    output = {'paragraphs':[{'text':'I recorded the job and location.',
+              'evidence':[{'ref':'s1','quote':sources[0]['text']},{'ref':'s2','quote':sources[1]['text']}]}]}
+    if change == 'unknown_alias':output['paragraphs'][0]['evidence'][0]['ref'] = 's99'
+    if change == 'wrong_source_quote':output['paragraphs'][0]['evidence'][0]['ref'] = 's2'
+    if change == 'missing_material':output['paragraphs'][0]['evidence'].pop()
+    original_quotes = [span['quote'] for span in output['paragraphs'][0]['evidence']]
+    narratives.expand_source_refs(output, refs)
+    assert [span['quote'] for span in output['paragraphs'][0]['evidence']] == original_quotes
+    with pytest.raises(ValueError):narratives.validate(output,sources)
 
 
 def test_source_change_rewrites_from_fresh_sources_not_old_derived_prose(author_memory):
