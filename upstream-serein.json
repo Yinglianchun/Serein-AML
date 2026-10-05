@@ -7,7 +7,8 @@
   "backend_file_count": 233,
   "local_overrides": {
     "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
-    "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks"
+    "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks",
+    "tests/test_public_features.py": "pin an explicit 10k prompt limit for the no-truncation regression independently of public prompt compaction and the raised 200k default"
   },
   "runtime_files": [
     ".dockerignore",

@@ -121,6 +121,8 @@ def output_for(role,request):
 async def synthetic_runner(role,request):return output_for(role,request)
 
 def test_pipeline_does_not_truncate_a_long_dialogue_unit(settings):
+    # Exercise explicit limits independently of the public 200k default.
+    save_settings(settings.database,{'pipeline':{'max_prompt_chars':10000}})
     raw_archive(settings).ingest([{'source_event_id':str(i),'session_id':'long','role':'assistant' if i==201 else 'user',
         'text':f'part {i}','created_at':'2025-01-01T00:00:00Z'} for i in range(202)],source='test')
     with pytest.raises(ValueError,match='提示词'):
