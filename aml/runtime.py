@@ -155,11 +155,20 @@ async def ingest_pipeline(settings):
             if blocked:
                 raise RuntimeError("Public Event pipeline has an unfinished or paused batch")
             return results
+        if result["status"] == "paused" and result.get("job_id"):
+            # The public host excludes this held scope on subsequent advances.
+            # Finish independent scopes, then keep Add pending at the final check.
+            if result["batch_id"] in seen:
+                raise RuntimeError("Public Event pipeline repeated a paused batch")
+            seen.add(result["batch_id"])
+            continue
         if result["status"] != "processed":
             raise RuntimeError("Public Event pipeline did not settle: " + result["status"])
-        if result["batch_id"] in seen or not result["processed_originals"]:
+        if result["batch_id"] in seen:
             return results
         seen.add(result["batch_id"])
+        if not result["processed_originals"] and not result.get("curator_omission_deferrals"):
+            return results
     raise RuntimeError("Public Event pipeline batch limit reached; retry this Add")
 
 
@@ -208,7 +217,15 @@ HOST_IDS:
             received = True
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
-            pipeline.validate(request, output)
+            try:
+                pipeline.validate(request, output)
+            except pipeline.latest.CuratorCoverageError as error:
+                # Public submit owns targeted repair, whole-scope retention and
+                # repeated-round pause. Archive the paid literal reply separately
+                # without counting it again as a host omission decision.
+                pipeline.record_attempt(settings.database, identifier, raw,
+                                        'curator_coverage_pending_host: ' + str(error))
+                return output
             pipeline.record_attempt(settings.database, identifier, raw)
             return output
         except ValueError as error:

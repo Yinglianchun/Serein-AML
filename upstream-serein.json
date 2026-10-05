@@ -4,7 +4,7 @@
   "previous_import_commit": "0bc2c64cf382193cd959c5e29ca1131a78297365",
   "public_release_version": "0.1.0-rc65",
   "backend_prefix": "src/serein/",
-  "backend_file_count": 232,
+  "backend_file_count": 233,
   "local_overrides": {
     "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
     "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks"
@@ -26,11 +26,13 @@
   ],
   "regression_tests": [
     "tests/test_authored_mcp_parity.py",
+    "tests/test_curator_material_identity.py",
     "tests/test_diary_discovery.py",
     "tests/test_domain_rules.py",
     "tests/test_event_handoff.py",
     "tests/test_event_writer_concurrency.py",
     "tests/test_gateway_contract.py",
+    "tests/test_latest_pipeline.py",
     "tests/test_live_clients.py",
     "tests/test_live_events.py",
     "tests/test_live_relations.py",
@@ -45,6 +47,7 @@
     "tests/test_pipeline_limits.py",
     "tests/test_pipeline_materials.py",
     "tests/test_pipeline_route_history.py",
+    "tests/test_pipeline_track_candidates.py",
     "tests/test_protected_append_sources.py",
     "tests/test_public_features.py",
     "tests/test_public_settings.py",
@@ -58,5 +61,65 @@
     "tests/test_track_continuation_parity.py",
     "tests/test_transcription_first.py",
     "tests/test_writer_append_policy.py"
+  ],
+  "baseline_backend_file_count": 232,
+  "applied_public_patches": [
+    {
+      "commit": "8259900f5cb81dc25681ec29cac581eaa76fdeb7",
+      "purpose": "Compact Track Router JSON without changing source text",
+      "backend_files": [
+        "src/serein/extensions/pipeline_latest.py"
+      ],
+      "regression_tests": []
+    },
+    {
+      "commit": "f5af63e402d418b33d64e07361451db7365e60ff",
+      "purpose": "Send complete Track Router role rules once",
+      "backend_files": [
+        "src/serein/extensions/pipeline.py",
+        "src/serein/extensions/pipeline_latest.py"
+      ],
+      "regression_tests": [
+        "tests_aml/test_router_rules.py"
+      ]
+    },
+    {
+      "commit": "03635a1a1ac3a071e6f000ba432d1d9ca793036c",
+      "purpose": "Raise default Event input/prompt budgets to 40k/200k",
+      "backend_files": [
+        "src/serein/deployment.py",
+        "src/serein/extensions/pipeline_limits.py"
+      ],
+      "regression_tests": [
+        "tests_aml/test_router_rules.py"
+      ]
+    },
+    {
+      "commit": "f1bd109d04d67f6cec7a2956526a748840a1d4f3",
+      "purpose": "Retain Curator omission scopes and continue independent work",
+      "backend_files": [
+        "src/serein/extensions/pipeline.py",
+        "src/serein/work_tasks.py"
+      ],
+      "regression_tests": [
+        "tests/test_latest_pipeline.py",
+        "tests/test_curator_material_identity.py",
+        "tests/test_pipeline_limits.py"
+      ]
+    },
+    {
+      "commit": "c23a4e4cdd903c5c05c7ce8310626c6ad716d8ac",
+      "purpose": "Add opt-in local Track candidate retrieval, disabled by default",
+      "backend_files": [
+        "src/serein/api/settings.py",
+        "src/serein/deployment.py",
+        "src/serein/extensions/pipeline.py",
+        "src/serein/extensions/pipeline_track_candidates.py"
+      ],
+      "regression_tests": [
+        "tests/test_pipeline_track_candidates.py",
+        "tests/test_track_continuation_parity.py"
+      ]
+    }
   ]
 }

@@ -6,9 +6,24 @@ This repository imports the published Serein backend from commit `b5b13800ad086e
 
 ## Public backend baseline
 
-The 232 files under `src/serein/` match that fixed upstream commit. The import includes Event continuation and evidence handling, recoverable processing stages, grounded narrative candidate discovery, diary search, and separate Event/Scene domain rules. The import scope and selected upstream regression tests are recorded in [`upstream-serein.json`](upstream-serein.json).
+The baseline imported 232 files under `src/serein/`; selected later public patches now bring the backend to 233 files. The base commit remains pinned, and every applied backend patch and its paths are recorded in [`upstream-serein.json`](upstream-serein.json). The import includes Event continuation and evidence handling, recoverable processing stages, grounded narrative candidate discovery, diary search, and separate Event/Scene domain rules.
 
 The cached-image transcription regression is aligned with the current append-only writer contract: an extension reads new sources, while prior image transcriptions remain cached and bound to the existing Event.
+
+Applied public patches compact Router JSON, send its role rules once, raise default
+input/prompt budgets to 40k/200k, retain Curator omission scopes while processing
+independent work, and add optional local Track candidate selection. Curator
+omissions never authorize incomplete ownership or fabricated Events: retained
+sources remain searchable originals, and repeated omission scopes pause under the
+public policy. AML drains independent scopes before reporting a remaining pause
+as an Add failure. Retries keep the original evidence and paid-attempt audit.
+
+Track selection is disabled by default (`pipeline.track_candidates_enabled=false`).
+When explicitly enabled, it keeps all cards inside the configured direct window
+(12 hours by default) and cards with unknown activity, plus up to eight locally
+matched older cards. It does not add a model call, delete stored Tracks or shorten
+source text. The decision uses the frozen batch policy on retries. Its effect on
+continuation must be measured before enabling it for an evaluation run.
 
 AML Search calls the same public `Services.recall` entry point as MCP `recall_memory`, with explicit `mode="lookup"`. With a selected embedding model, it queries the original question semantically and supplements it with lexical searches. The public reranker orders the combined evidence. This repository carries the backend needed by the API; the Serein web application remains in the original project.
 
@@ -42,7 +57,7 @@ MCP and automatic recall share the `typed_memory` card and Narrative menu render
 
 Both automatic organization and menu expansion are opt-in. `SEREIN_AML_ORGANIZE_ARCS=1` enables the public Scout on the isolated benchmark database after each Add; the nightly wall-clock delay is bypassed for synchronous ingestion. Scout reads bounded public candidates and may decline to group them. It creates empty collecting lines and material relationships, preserving the public boundary that automatic organization does **not** author Narrative prose. Existing authored volumes retain their preview/save contract. `SEREIN_AML_EXPAND_ARCS=1` lets Search choose and read related materials from these menus, so a new evaluation database can exercise real automatic grouping without manually supplied themes.
 
-`SEREIN_AML_WRITE_NARRATIVES=1` adds a separate benchmark authoring step after Scout and enables organization automatically. It uses the selected `writer` model (the development assignment or competition mini) to write coherent prose from the public frozen source snapshot. Bound original messages are preferred to derived Event/Scene summaries. Each paragraph carries validated exact source refs and quotes in the local authoring receipt; the model remains responsible for semantic faithfulness. All bound materials must be represented. The existing Narrative `read → preview → save` checks still validate source snapshots, document hashes and revisions before publishing the exact draft. Scout remains material-only, and the imported public backend is unchanged.
+`SEREIN_AML_WRITE_NARRATIVES=1` adds a separate benchmark authoring step after Scout and enables organization automatically. It uses the selected `writer` model (the development assignment or competition mini) to write coherent prose from the public frozen source snapshot. Bound original messages are preferred to derived Event/Scene summaries. Each paragraph carries validated exact source refs and quotes in the local authoring receipt; the model remains responsible for semantic faithfulness. All bound materials must be represented. The existing Narrative `read → preview → save` checks still validate source snapshots, document hashes and revisions before publishing the exact draft. Scout remains material-only, and the public preview/save contract is retained.
 
 New collecting volumes are authored; previously AML-authored volumes are rewritten from all current bound sources when those sources or the topic change. This uses `rewrite`, because Scout has already appended new membership before Writer runs. Unchanged inputs and bodies skip generation; independently authored or manually edited prose is preserved. Pending collecting volumes are revisited even when Scout now reports unchanged. The published revision and AML acknowledgment commit together, so a retry after a later index failure cannot publish twice. Add stays pending on writing/preview/save failure, and source conflicts require a fresh read and draft. Narrative prose is refreshed in the lexical index; the public vector/passage indexes cover Event and Scene. Search can select menu index 0 for a relevant completed Narrative, or select individual materials and decline irrelevant menus. Automatic writing and menu expansion are independently opt-in; use both to exercise the complete route.
 
