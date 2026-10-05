@@ -27,6 +27,18 @@ class EmbeddingClient:
         vector = self._request(prepared, 1, client=client)[0]
         return {"query": text, "profile": self.profile, "embedding": vector}
 
+    def queries(self, texts, *, client=None):
+        """Batch v4 query inputs while retaining their query instruction and order."""
+        if self.profile['model'] != 'text-embedding-v4':
+            return [self.query(text, client=client) for text in texts]
+        prepared = [self.prepare(text, self.profile['query_instruction']) for text in texts]
+        vectors = []
+        for offset in range(0, len(prepared), 10):
+            batch = prepared[offset:offset+10]
+            vectors.extend(self._request(batch, len(batch), client=client))
+        return [{'query':text, 'profile':self.profile, 'embedding':vector}
+                for text, vector in zip(texts, vectors)]
+
     def prepare(self, text, instruction, *, kind="Query"):
         if not text.strip() or not self.dimension:
             raise ValueError("Text and a cached embedding dimension are required")
@@ -38,7 +50,14 @@ class EmbeddingClient:
         if not texts:
             return []
         prepared = [self.prepare(text, self.profile["document_instruction"], kind="Document") for text in texts]
-        return self._request(prepared, len(texts), client=client)
+        # DashScope v4 accepts at most ten inputs. Retain every prepared input;
+        # each response still validates positions relative to its own request.
+        size = 10 if self.profile["model"] == "text-embedding-v4" else len(prepared)
+        vectors = []
+        for offset in range(0, len(prepared), size):
+            batch = prepared[offset:offset+size]
+            vectors.extend(self._request(batch, len(batch), client=client))
+        return vectors
 
     def _request(self, inputs, count, *, client=None):
         import httpx
