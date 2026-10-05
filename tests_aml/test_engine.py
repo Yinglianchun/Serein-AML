@@ -70,6 +70,17 @@ def search(**changes):
     return engine.search_memory(**{'query': 'Where did Alice move?', 'options': None, 'user_id': 'user-a', 'top_k': 100, **changes})
 
 
+def select_competition_embedding():
+    filename = runtime.os.environ['SEREIN_AML_MODEL_CONFIG']
+    with open(filename, encoding='utf-8') as stream:
+        source = json.load(stream)
+    source['models'].append({'id':'embedding', 'model':'text-embedding-v4',
+                            'base_url':'https://embedding.invalid/v1', 'protocol':'openai'})
+    source['assignments']['embedding'] = 'embedding'
+    with open(filename, 'w', encoding='utf-8') as stream:
+        json.dump(source, stream)
+
+
 def test_add_then_search_uses_real_public_pipeline_and_exact_evidence(memory):
     add()
     assert memory == ['track_router', 'event_curator', 'event_writer']
@@ -143,6 +154,8 @@ def test_development_cannot_be_reused_as_competition(memory, monkeypatch):
     add()
     monkeypatch.setenv('SEREIN_AML_PROFILE', 'competition')
     monkeypatch.setenv('OR_key', 'synthetic-key')
+    select_competition_embedding()
+    assert runtime.configuration()[1]['profile'] == 'competition'
     with pytest.raises(runtime.ProfileConflict):
         add()
     with pytest.raises(runtime.ProfileConflict):
@@ -228,10 +241,12 @@ def test_competition_overrides_every_generative_role(memory, monkeypatch):
     monkeypatch.setenv('OR_key', 'synthetic-key')
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
     monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
+    select_competition_embedding()
     config, marker = runtime.configuration()
     assert marker['profile'] == 'competition'
-    assert set(config['assignments'].values()) == {'aml-mini'}
-    assert config['models'][0]['model'] == 'openai/gpt-4o-mini'
+    assert {config['assignments'][role] for role in runtime.GENERATIVE_ROLES} == {'aml-mini'}
+    assert config['assignments']['embedding'] == 'embedding'
+    assert next(m for m in config['models'] if m['id'] == 'aml-mini')['model'] == 'openai/gpt-4o-mini'
     assert 'synthetic-key' not in str(marker)
 
 

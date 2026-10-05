@@ -29,7 +29,7 @@ Return only the original task's JSON object, without additional fields.
 
 
 class ProfileConflict(ValueError):
-    """Development data cannot silently become a competition database."""
+    """An invalid or changed benchmark profile cannot silently reuse data."""
 
 
 def configuration():
@@ -60,6 +60,11 @@ def configuration():
             models[model["id"]] = model
             assignments[role] = model["id"]
     else:
+        embedding = models.get(assignments.get("embedding"))
+        if not embedding or embedding.get("model") != "text-embedding-v4":
+            raise ProfileConflict("Academic competition requires a selected text-embedding-v4 in SEREIN_AML_MODEL_CONFIG")
+        if embedding.get("protocol") != "openai":
+            raise ProfileConflict("Competition text-embedding-v4 requires an OpenAI-compatible embeddings API")
         key = os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("OR_key", "").strip()
         base = os.getenv("OPENAI_BASE_URL", "").strip().rstrip("/")
         if not base:
