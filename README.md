@@ -159,6 +159,8 @@ For development, set `SEREIN_AML_PROFILE=development` and provide that file. The
 
 Before official Smoke, run one local synthetic Add → Search acceptance with the competition profile and fresh storage, including the optional tagging, narrative authoring and evidence-planning features intended for submission. Check synchronous persistence, idempotent Add retry, user isolation and returned evidence. Then deploy that fixed version's public Add/Search/Health endpoints, apply for or bind the official Eval Key, and run Smoke through AML. Local fixtures and unit tests are not official Smoke or a leaderboard score.
 
+The v4 embedding transport splits document batches into at most ten inputs per provider request, preserving every input and the existing position/model/dimension checks. Other models retain their original batching. This follows the [DashScope synchronous embedding limits](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api/); provider input-length errors still fail ingestion rather than marking partial indexing complete.
+
 Optional:
 
 ```bash

@@ -38,7 +38,14 @@ class EmbeddingClient:
         if not texts:
             return []
         prepared = [self.prepare(text, self.profile["document_instruction"], kind="Document") for text in texts]
-        return self._request(prepared, len(texts), client=client)
+        # DashScope v4 accepts at most ten inputs. Retain every prepared input;
+        # each response still validates positions relative to its own request.
+        size = 10 if self.profile["model"] == "text-embedding-v4" else len(prepared)
+        vectors = []
+        for offset in range(0, len(prepared), size):
+            batch = prepared[offset:offset+size]
+            vectors.extend(self._request(batch, len(batch), client=client))
+        return vectors
 
     def _request(self, inputs, count, *, client=None):
         import httpx
