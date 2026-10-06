@@ -67,8 +67,13 @@ supplies empty detail lists and an empty self-review object when absent, without
 inventing assessment booleans. Frozen source blocks, attachment data, ownership,
 append budgets and existing bodies still pass the public pipeline checks. Optional
 model claim/sentence receipts are discarded before settlement rather than triggering
-rewrites; the literal model reply remains audited. Router, Curator, tagging and Search
-are unchanged.
+rewrites; the literal model reply remains audited. Router, tagging and Search
+are unchanged. Curator has a format adapter: explicit disposition objects misplaced
+in integer root lists move to their review rows. Redundant skip/defer declarations
+for known read-only context units are removed from both lists and review rows;
+their original messages remain unprocessed and searchable. Stable-unit decisions,
+unknown IDs, overlapping ownership and parked ownership still pass through the
+unchanged public validation. This does not infer a disposition or force admission.
 Narrative Writer may omit repetition or asides instead of citing every bound
 material, and need not follow a prescribed viewpoint or layout. Extra presentation
 fields are ignored; Markdown heading words become prose so they cannot create

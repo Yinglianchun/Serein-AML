@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -64,12 +65,62 @@ def prepare_writer_output(request, output):
     return output
 
 
+def prepare_curator_output(request, output):
+    """Normalize redundant read-only dispositions, without settling their sources."""
+    if (not simplified_authoring() or request['role'] != 'event_curator'
+            or not isinstance(output, dict) or output.get('context_request') is not None):
+        return output
+    component = request['component']
+    stable = {message['id'] for message in component['messages']}
+    readonly = {unit['unit_root_message_id'] for unit in component['memberships']
+                if not set(unit['source_message_ids']) & stable}
+    output = copy.deepcopy(output)
+    review = output.get('decision_review')
+    dispositions = review.get('dispositions') if isinstance(review, dict) else None
+    def writable_roots(values):
+        # Unknown IDs and all stable ownership errors still reach public validation.
+        return [value for value in values if not (type(value) is int and value in readonly)]
+    for label in ('skip', 'defer'):
+        key = label + '_unit_roots'
+        if not isinstance(output.get(key), list):
+            continue
+        roots = []
+        for item in output[key]:
+            if (isinstance(dispositions, list) and isinstance(item, dict)
+                    and set(item) == {'disposition', 'unit_roots', 'reason', 'parked_source_message_ids'}
+                    and item['disposition'] == label and isinstance(item['unit_roots'], list)):
+                # A review row placed in the ID list declares its roots explicitly.
+                # Move its literal reason/parked references; never manufacture evidence.
+                roots.extend(item['unit_roots'])
+                if item not in dispositions:
+                    dispositions.append(item)
+            else:
+                roots.append(item)
+        output[key] = writable_roots(roots)
+    if isinstance(dispositions, list):
+        retained = []
+        for row in dispositions:
+            if isinstance(row, dict) and isinstance(row.get('unit_roots'), list):
+                original = row['unit_roots']
+                row['unit_roots'] = writable_roots(original)
+                if original and not row['unit_roots']:
+                    continue
+            retained.append(row)
+        review['dispositions'] = retained
+    return output
+
+
 CURATOR_FORMAT = """\nJSON structure reminder (no change to the role or evidence rules):
 Each decision_review.events item has event_index and reason. Do NOT add an
 evidence field to those items. Optional materials/admission use only the exact
 schema in the original task. Verbatim evidence belongs to boundaries,
 dispositions or bridge_exclusions, in their original specified shapes.
 Return only the original task's JSON object, without additional fields.
+skip_unit_roots and defer_unit_roots are lists of integer STABLE roots only.
+Put disposition objects under decision_review.dispositions, never in those lists.
+Do not put parked/context_only roots in ANY ownership or disposition list.
+If parked evidence postpones a stable unit, defer the STABLE root and cite the
+parked source only in that disposition's parked_source_message_ids.
 """
 
 
@@ -279,6 +330,7 @@ HOST_IDS:
             received = True
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
+            output = prepare_curator_output(request, output)
             output = prepare_writer_output(request, output)
             try:
                 pipeline.validate(request, output)
@@ -312,7 +364,7 @@ def stage_json(raw, role):
         if isinstance(wrapped, dict):value = wrapped
     integers = {'event_index', 'left_event_index', 'right_event_index', 'sentence_index',
                 'source_message_id', 'unit_root_message_id', 'before_message_id', 'input_image'}
-    integer_lists = {'owned_unit_roots', 'skip_unit_roots', 'defer_unit_roots',
+    integer_lists = {'owned_unit_roots', 'skip_unit_roots', 'defer_unit_roots', 'unit_roots',
                      'source_message_ids', 'parked_source_message_ids', 'picks'}
     def number(item):
         return int(item) if isinstance(item, str) and re.fullmatch(r'[0-9]+', item) else item
@@ -320,7 +372,7 @@ def stage_json(raw, role):
         if isinstance(item, list):return [visit(child) for child in item]
         if not isinstance(item, dict):return item
         return {key: number(child) if key in integers else
-                [number(part) for part in child] if key in integer_lists and isinstance(child, list) else visit(child)
+                [visit(number(part)) for part in child] if key in integer_lists and isinstance(child, list) else visit(child)
                 for key, child in item.items()}
     value = visit(value)
     if role == 'event_curator' and isinstance(value, dict):
