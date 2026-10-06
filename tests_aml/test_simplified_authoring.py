@@ -59,17 +59,23 @@ def test_lite_writer_keeps_append_budget_and_context_requests(monkeypatch):
     assert runtime.writer_payload(request) == (request['rules'], request['prompt'])
 
 
-def test_lite_does_not_strip_invalid_optional_event_evidence(monkeypatch):
+def test_lite_discards_invalid_optional_event_citations_without_certifying_them(monkeypatch):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     from serein.extensions.pipeline_latest import validate_event_writer_result
     request = {'role': 'event_writer', 'messages': [{'id': 1, 'content': 'Alice moved to Paris.'}]}
     output = role_output('event_writer', request)
     output['claim_groups'][0]['source_spans'][0]['quote'] = 'Invented quotation'
+    original = json.dumps(output)
     output = runtime.prepare_writer_output(request, output)
-    assert validate_event_writer_result(output, request['messages'])
+    assert 'claim_groups' not in output and 'sentence_evidence' not in output
+    assert validate_event_writer_result(output, request['messages']) == []
+    monkeypatch.delenv('SEREIN_AML_SIMPLIFY_AUTHORING')
+    strict = runtime.prepare_writer_output(request, json.loads(original))
+    assert validate_event_writer_result(strict, request['messages'])
 
 
-def test_lite_narrative_accepts_selection_and_heading_without_paid_retry(author_memory, monkeypatch):
+@pytest.mark.parametrize('shape', ['body', 'paragraphs'])
+def test_lite_narrative_publishes_without_citation_retry_or_false_receipt(author_memory, monkeypatch, shape):
     settings, _, _ = author_memory
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     calls = []
@@ -78,8 +84,10 @@ def test_lite_narrative_accepts_selection_and_heading_without_paid_retry(author_
         data = json.loads(payload['messages'][1]['content'])
         calls.append(data)
         source = next(row for row in data['sources'] if 'CopperBay' in row['text'])
-        result = {'paragraphs': [{'text': '## Manufacturing\n' + source['text'], 'self_review': 'unneeded',
-                    'evidence': [{'ref': source['ref'], 'quote': source['text'], 'reason': 'unneeded'}]}]}
+        assert 'No citations' in payload['messages'][0]['content']
+        prose = '## Manufacturing\n' + source['text']
+        result = {'body': prose} if shape == 'body' else {'paragraphs': [
+            {'text': prose, 'evidence': [{'ref': 'invented', 'quote': 'An unverified model quotation'}]}]}
         return {'choices': [{'message': {'content': json.dumps(result)}}]}
 
     monkeypatch.setattr(model_runtime, 'complete', complete)
@@ -89,12 +97,15 @@ def test_lite_narrative_accepts_selection_and_heading_without_paid_retry(author_
     assert row['body'].startswith('Manufacturing\n') and 'CopperBay' in row['body']
     assert row['publication_status'] == 'reviewed'
     assert row['linked_scene_ids'] == ['scene_purchase', 'scene_factory']
+    with Store(settings.database, read_only=True) as store:
+        audit = json.loads(store.conn.execute('SELECT evidence_json FROM aml_narrative_receipts').fetchone()[0])
+        assert all(item['evidence'] == [] and item['citation_validation'] == 'not_performed' for item in audit)
     assert asyncio.run(narratives.author(settings))['unchanged'] == ['narrative_device']
     assert len(calls) == 1
 
 
 @pytest.mark.parametrize('change', ['unknown_ref', 'wrong_source', 'invented_quote', 'no_evidence'])
-def test_lite_narrative_rejects_ungrounded_material(change):
+def test_lite_narrative_ignores_unverified_citations(change):
     sources = [{'ref': 'a', 'material': 'event:a', 'text': 'Alice joined Lumen.'},
                {'ref': 'b', 'material': 'event:b', 'text': 'Lumen is in Stonebridge.'}]
     paragraph = {'text': 'Alice joined Lumen.', 'evidence': [{'ref': 'a', 'quote': sources[0]['text']}]}
@@ -102,8 +113,16 @@ def test_lite_narrative_rejects_ungrounded_material(change):
     if change == 'wrong_source': paragraph['evidence'][0]['ref'] = 'b'
     if change == 'invented_quote': paragraph['evidence'][0]['quote'] = 'Alice moved to Stonebridge.'
     if change == 'no_evidence': paragraph['evidence'] = []
+    body, audit = narratives.validate({'paragraphs': [paragraph]}, sources, simplified=True)
+    assert body == paragraph['text'] and audit[0]['evidence'] == []
+    assert audit[0]['citation_validation'] == 'not_performed'
+
+
+@pytest.mark.parametrize('output', [{}, {'body': ''}, {'body': 5}, {'paragraphs': []},
+                                   {'paragraphs': [{'text': ''}]}, {'body': 'x' * 100001}])
+def test_lite_still_rejects_unusable_prose(output):
     with pytest.raises(ValueError):
-        narratives.validate({'paragraphs': [paragraph]}, sources, simplified=True)
+        narratives.validate(output, [], simplified=True)
 
 
 def test_authoring_policy_cannot_change_mid_database(memory, monkeypatch):

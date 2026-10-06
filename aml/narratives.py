@@ -100,24 +100,23 @@ def source_catalog(materials):
 
 
 def validate(output, sources, *, simplified=False):
+    if simplified:
+        return validate_prose(output)
     paragraphs = output.get("paragraphs") if isinstance(output, dict) else None
     if not isinstance(paragraphs, list) or not 1 <= len(paragraphs) <= 128:
         raise ValueError("paragraphs must contain 1..128 evidence-bound paragraphs")
     catalog = {source["ref"]: source for source in sources}
-    used, texts, validated = set(), [], []
+    used, texts = set(), []
     for paragraph in paragraphs:
-        if (not isinstance(paragraph, dict) or not {"text", "evidence"}.issubset(paragraph)
-                or (not simplified and set(paragraph) != {"text", "evidence"})):
+        if not isinstance(paragraph, dict) or set(paragraph) != {"text", "evidence"}:
             raise ValueError("Each paragraph requires only text and evidence")
         text, evidence = paragraph["text"], paragraph["evidence"]
-        if not isinstance(text, str) or not text.strip() or (not simplified and re.search(r"(?m)^\s*##\s", text)):
+        if not isinstance(text, str) or not text.strip() or re.search(r"(?m)^\s*##\s", text):
             raise ValueError("Write prose paragraphs, without document headings or source ledgers")
         if not isinstance(evidence, list) or not 1 <= len(evidence) <= 16:
             raise ValueError("Each paragraph requires 1..16 exact source quotes")
-        checked = []
         for span in evidence:
-            if (not isinstance(span, dict) or not {"ref", "quote"}.issubset(span)
-                    or (not simplified and set(span) != {"ref", "quote"})):
+            if not isinstance(span, dict) or set(span) != {"ref", "quote"}:
                 raise ValueError("Each evidence item requires only ref and quote")
             ref, quote = span["ref"], span["quote"]
             if not isinstance(ref, str) or ref not in catalog:
@@ -125,19 +124,34 @@ def validate(output, sources, *, simplified=False):
             if not isinstance(quote, str) or not quote.strip() or quote not in catalog[ref]["text"]:
                 raise ValueError("Evidence quote must occur verbatim in its exact source")
             used.add(catalog[ref]["material"])
-            checked.append({'ref': ref, 'quote': quote})
-        if simplified:
-            # Public volumes use level-two headings as section boundaries.
-            # Keep the model's heading words as prose instead of requesting a rewrite.
-            text = re.sub(r'(?m)^\s{0,3}#{1,6}[ \t]+(.+?)\s*#*[ \t]*$', r'\1', text)
         texts.append(text.strip())
-        validated.append({'text': text.strip(), 'evidence': checked})
-    if not simplified and used != {source["material"] for source in sources}:
+    if used != {source["material"] for source in sources}:
         raise ValueError("Ground the narrative in every bound material; do not omit a material")
     body = "\n\n".join(texts)
     if len(body) > 100000:
         raise ValueError("Narrative body exceeds the public preview limit")
-    return body, validated if simplified else paragraphs
+    return body, paragraphs
+
+
+def validate_prose(output):
+    """Accept prose backed by the frozen volume, without certifying model citations."""
+    if not isinstance(output, dict):
+        raise ValueError('Narrative output must be a JSON object')
+    if 'body' in output:
+        texts = [output['body']]
+    else:
+        paragraphs = output.get('paragraphs')
+        if not isinstance(paragraphs, list) or not paragraphs:
+            raise ValueError('Narrative requires body or nonempty paragraphs')
+        texts = [item.get('text') if isinstance(item, dict) else item for item in paragraphs]
+    if any(not isinstance(text, str) or not text.strip() for text in texts):
+        raise ValueError('Narrative prose must be nonempty text')
+    # Keep heading words, but prevent them from becoming public section boundaries.
+    texts = [re.sub(r'(?m)^\s{0,3}#{1,6}[ \t]+(.+?)\s*#*[ \t]*$', r'\1', text).strip() for text in texts]
+    body = '\n\n'.join(texts)
+    if len(body) > 100000:
+        raise ValueError('Narrative body exceeds the public preview limit')
+    return body, [{'text': text, 'evidence': [], 'citation_validation': 'not_performed'} for text in texts]
 
 
 async def draft(settings, narrative, receipt, stamp):
@@ -176,10 +190,9 @@ relationships, dates, numbers, uncertainty, corrections and old/new states. Keep
 distinct; never invent facts or causality. Recording timestamps do not prove event dates.
 Select important material; repetition and unrelated asides may be omitted. You do not
 need to cite every source or use a prescribed viewpoint, style or section layout.
-Each paragraph needs at least one supporting exact quote copied from its listed source.
-Return JSON: {"paragraphs":[{"text":"memory prose","evidence":[{"ref":"s1","quote":"exact source text"}]}]}.
-Use only the listed short refs. Quotes must belong to that exact source; no paraphrased
-quotes or invented refs. You remain responsible for whether the quotes support the prose.
+Return JSON: {"body":"memory prose"}. No citations, source IDs, detail lists or
+self-review are required. The host retains the frozen source snapshot separately.
+You remain responsible for faithful prose; avoid quotation marks for paraphrases.
 """
     client = TaskClient(settings.database, "writer")
     try:

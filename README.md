@@ -65,16 +65,23 @@ New collecting volumes are authored; previously AML-authored volumes are rewritt
 Event Writer needs only `evidence_sufficient`, `title`, and `event_draft`; the host
 supplies empty detail lists and an empty self-review object when absent, without
 inventing assessment booleans. Frozen source blocks, attachment data, ownership,
-append budgets, existing bodies, and any supplied optional evidence receipts still
-pass the public pipeline checks. Router, Curator, tagging and Search are unchanged.
+append budgets and existing bodies still pass the public pipeline checks. Optional
+model claim/sentence receipts are discarded before settlement rather than triggering
+rewrites; the literal model reply remains audited. Router, Curator, tagging and Search
+are unchanged.
 Narrative Writer may omit repetition or asides instead of citing every bound
 material, and need not follow a prescribed viewpoint or layout. Extra presentation
 fields are ignored; Markdown heading words become prose so they cannot create
-public volume section boundaries. Every paragraph still requires a valid source
-ref and its exact quote; unknown refs, quotations from another source, empty
-evidence, stale sources and preview/save conflicts remain failures. This trades
-exhaustive material citation for editorial selection; it does not establish that
-all answer-relevant facts survived summarization. All bound materials remain
+public volume section boundaries. Narrative output needs only `{"body":"prose"}`;
+legacy paragraph output is also accepted without inspecting its citation fields.
+Quotation mismatches, invented citation refs, omitted citations and incomplete
+material citation no longer trigger Writer retries in this mode. The authoring
+receipt records empty evidence with `citation_validation=not_performed`, without
+claiming the generated prose or model quotations were verified. Frozen material
+binding/hash, document revisions and preview/save conflicts still apply. This trades
+sentence-level citation checks and exhaustive coverage for editorial selection;
+it does not establish that all answer-relevant facts survived summarization.
+All bound materials remain
 available through the menu. The option defaults off and is part of the database
 profile: use a fresh empty data directory and a separately disclosed version when
 enabling it. Do not switch it during an evaluation. Raw model replies remain audited.

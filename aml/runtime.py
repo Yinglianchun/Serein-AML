@@ -29,8 +29,8 @@ For append, write only the new passage within the supplied remaining character b
 the host preserves the old body. For rewrite/merge, preserve important earlier facts.
 Return JSON with evidence_sufficient (boolean), title and event_draft (strings).
 If evidence is insufficient, return false and empty title/body. No self-review or
-detail lists are required. Claim/sentence receipts are optional; if supplied, their
-source IDs and literal quotes are validated. Follow any supplied bounded context-read
+detail lists or claim/sentence receipts are required. The host retains the original
+source bindings separately. Follow any supplied bounded context-read
 instructions when essential context is missing. Aim for 500 characters, at most 1500.
 """
 
@@ -52,11 +52,13 @@ def writer_payload(request):
 
 
 def prepare_writer_output(request, output):
-    """Supply empty administrative fields, never facts or self-assessed booleans."""
+    """Discard optional citation scaffolding; supply no facts or assessed booleans."""
     if (simplified_authoring() and request['role'] == 'event_writer'
             and not request.get('transcription_only') and isinstance(output, dict)
             and output.get('context_request') is None):
         output = dict(output)
+        for field in ('claim_groups', 'sentence_evidence'):
+            output.pop(field, None)
         for field, value in (('kept_details', []), ('discarded_details', []), ('self_review', {})):
             output.setdefault(field, value)
     return output
@@ -134,7 +136,7 @@ def configuration():
                       "memory_tagging": tag_memories,
                       "models": [{k: v for k, v in m.items() if k != "api_key"} for m in changes["models"]]}
     if simplified_authoring():
-        public_profile['authoring_policy'] = 'lite-v1'
+        public_profile['authoring_policy'] = 'lite-v2-prose'
     signature = hashlib.sha256(encode(public_profile).encode()).hexdigest()
     return changes, {"profile": profile, "signature": signature}
 
