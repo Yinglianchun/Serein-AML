@@ -61,6 +61,24 @@ Both automatic organization and menu expansion are opt-in. `SEREIN_AML_ORGANIZE_
 
 New collecting volumes are authored; previously AML-authored volumes are rewritten from all current bound sources when those sources or the topic change. This uses `rewrite`, because Scout has already appended new membership before Writer runs. Unchanged inputs and bodies skip generation; independently authored or manually edited prose is preserved. Pending collecting volumes are revisited even when Scout now reports unchanged. The published revision and AML acknowledgment commit together, so a retry after a later index failure cannot publish twice. Add stays pending on writing/preview/save failure, and source conflicts require a fresh read and draft. Narrative prose is refreshed in the lexical index; the public vector/passage indexes cover Event and Scene. Search can select menu index 0 for a relevant completed Narrative, or select individual materials and decline irrelevant menus. Automatic writing and menu expansion are independently opt-in; use both to exercise the complete route.
 
+`SEREIN_AML_SIMPLIFY_AUTHORING=1` opts into shorter benchmark Writer instructions.
+Event Writer needs only `evidence_sufficient`, `title`, and `event_draft`; the host
+supplies empty detail lists and an empty self-review object when absent, without
+inventing assessment booleans. Frozen source blocks, attachment data, ownership,
+append budgets, existing bodies, and any supplied optional evidence receipts still
+pass the public pipeline checks. Router, Curator, tagging and Search are unchanged.
+Narrative Writer may omit repetition or asides instead of citing every bound
+material, and need not follow a prescribed viewpoint or layout. Extra presentation
+fields are ignored; Markdown heading words become prose so they cannot create
+public volume section boundaries. Every paragraph still requires a valid source
+ref and its exact quote; unknown refs, quotations from another source, empty
+evidence, stale sources and preview/save conflicts remain failures. This trades
+exhaustive material citation for editorial selection; it does not establish that
+all answer-relevant facts survived summarization. All bound materials remain
+available through the menu. The option defaults off and is part of the database
+profile: use a fresh empty data directory and a separately disclosed version when
+enabling it. Do not switch it during an evaluation. Raw model replies remain audited.
+
 Before returning a volume body, Search also checks that its current Event/Scene materials are readable and allowed for the original question. AML-authored prose must still match its committed source snapshot, selected membership, title/focus and body hash. Changed or newly linked materials suppress the old prose until it is rewritten; independently eligible individual materials remain available.
 
 `SEREIN_AML_TAG_MEMORIES=1` runs the unchanged public metadata-tagging queue synchronously after Event settlement. The `operit_tagging` model suggests a primary domain and extracts named entities from exact bound originals, or explicitly labeled body-only material when no original is bound. Invalid entity refs/quotes are filtered by the public validator; a valid empty entity list is allowed. Authored titles, bodies, domains and cues are preserved. Eligible imported Scenes use the public cue-generation rules; no Event cues or new facts are invented. Aliases remain suggestions and never merge identities.
