@@ -110,6 +110,20 @@ def prepare_curator_output(request, output):
     return output
 
 
+def prepare_router_output(request, output):
+    """A primary Track is already routed; a self-context ref adds no relation."""
+    if (not simplified_authoring() or request['role'] != 'track_router'
+            or not isinstance(output, dict) or not isinstance(output.get('message_assignments'), list)):
+        return output
+    output = copy.deepcopy(output)
+    for row in output['message_assignments']:
+        if (isinstance(row, dict) and isinstance(row.get('primary_track_ref'), str)
+                and isinstance(row.get('context_track_refs'), list)):
+            row['context_track_refs'] = [ref for ref in row['context_track_refs']
+                                        if ref != row['primary_track_ref']]
+    return output
+
+
 CURATOR_FORMAT = """\nJSON structure reminder (no change to the role or evidence rules):
 Each decision_review.events item has event_index and reason. Do NOT add an
 evidence field to those items. Optional materials/admission use only the exact
@@ -291,6 +305,11 @@ order; never combine a user message and its reply into one assignment. Determine
 each Track and routing_role from the original dialogue under the role rules.
 The complete required source_message_id sequence is:
 """ + encode([message['id'] for message in request['messages']])
+        reminder += """
+context_track_refs must exclude that row's primary_track_ref. If no DIFFERENT
+Track supplies context, use []. A bridge still needs a genuinely different
+valid context Track; never invent one or downgrade its role to repair the schema.
+"""
     elif role == 'event_curator':
         component = request['component']
         stable = {message['id'] for message in component['messages']}
@@ -318,9 +337,19 @@ HOST_IDS:
         identifier = store.conn.execute("SELECT id FROM pipeline_jobs WHERE batch_id=? AND "
             "json_extract(request_json,'$.role')=? AND output_json IS NULL ORDER BY rowid DESC LIMIT 1",
             (request['batch_id'], role)).fetchone()[0]
+        attempts = 3
+        if simplified_authoring():
+            reset = store.conn.execute("SELECT coalesce(max(attempt),0) FROM pipeline_attempts "
+                "WHERE job_id=? AND error='curator_omission_retry_reset'", (identifier,)).fetchone()[0]
+            rejected = store.conn.execute("SELECT count(*) FROM pipeline_attempts WHERE job_id=? "
+                "AND attempt>? AND (output_text!='' OR error LIKE 'aml_stage_validation:%') AND error!='' "
+                "AND error NOT LIKE 'curator_coverage_pending_host:%'", (identifier, reset)).fetchone()[0]
+            attempts = max(0, 3 - rejected)
+    if not attempts:
+        raise ValueError('AML stage validation retry budget exhausted; use public batch retry after repair')
     # The host owns durable jobs and settlement. Archive the exact reply; only
     # normalize its representation before enforcing the public semantic rules.
-    for attempt in range(3):
+    for attempt in range(attempts):
         raw = ''
         received = False
         try:
@@ -330,6 +359,7 @@ HOST_IDS:
             received = True
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
+            output = prepare_router_output(request, output)
             output = prepare_curator_output(request, output)
             output = prepare_writer_output(request, output)
             try:
@@ -344,8 +374,9 @@ HOST_IDS:
             pipeline.record_attempt(settings.database, identifier, raw)
             return output
         except ValueError as error:
-            pipeline.record_attempt(settings.database, identifier, raw, str(error))
-            if not received or attempt == 2:
+            audit_error = ('aml_stage_validation: ' if received and simplified_authoring() else '') + str(error)
+            pipeline.record_attempt(settings.database, identifier, raw, audit_error)
+            if not received or attempt == attempts - 1:
                 raise
             correction = '\nHost validation failed. Keep the original IDs and evidence; return the full corrected JSON.\n' + str(error)
             room = maximum - len(rules) - len(base_prompt) - len(reminder) - len(correction) - 80
