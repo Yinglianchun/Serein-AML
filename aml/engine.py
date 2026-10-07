@@ -695,7 +695,7 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                                          [row['id'] for row in selected]))[:min(top_k, _RETURN_CAP)]
                 selected = [records[key] for key in ids]
             with Reader(paths.database) as reader:
-                output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP)
+                output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP, groups=valid_groups)
                 # A model call can overlap an external source/material edit.
                 output = [row for row in output if candidates[row['id']]['kind'] != 'narrative' or
                           narratives.readable_for_search(prepared, reader, row['id'], original_query, policy)]
@@ -708,8 +708,7 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     fresh_groups.append(group)
             returned = {row['id']: row['content'] for row in output}
             accepted_expansions = {key for group in fresh_groups
-                if all(key in returned for key in group['ids']) and all(
-                    quote in returned.get(key, '') for key, quotes in group.get('focus', {}).items() for quote in quotes)
+                if all(key in returned for key in group['ids'])
                 for key in group['ids']}
             return [row for row in output if row['id'] in direct_ids or row['id'] in accepted_expansions]
         # Reserve space for every chosen record; one long volume must not crowd out other evidence.

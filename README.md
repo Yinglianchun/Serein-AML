@@ -269,14 +269,24 @@ Changed/discarded sources cannot fall back to their old summary. Current Narrati
 material snapshots are rechecked after selection. Shared Scene/Event source units
 are deduplicated. Existing paired expansion evidence must still survive together.
 
+Selection starts with memory bodies. Local binding/visibility checks still read
+source snapshots, but extra original text is not sent to the model by default.
 One additional model call chooses existing sentence IDs rather than writing an
-answer. The short task asks it to retain intermediate steps, corrections,
+answer. If a body lacks a specific fact, transition or time reference, it may
+request originals for up to four records; one bounded follow-up selection reads
+those originals, without a further reading or correction loop. The short task
+asks it to retain intermediate steps, corrections,
 cancellations and unresolved conflicts. Optional state labels are explicitly
-model-assessed, not proof of a current fact. The host renders source excerpts,
+model-assessed, not proof of a current fact. The host renders body/source excerpts,
 speaker/message dates and date normalization. Invalid selections fail closed;
 there is no automatic paid correction loop. All results state partial coverage:
 candidate, input and output limits may omit relevant history. A complete global
-summary or reliable current-state resolution is not guaranteed.
+summary or reliable current-state resolution is not guaranteed. Final expansion
+retention requires both reviewed records, not verbatim repetition of an Event
+sentence in its differently worded original. The selector receives linked IDs
+and must preserve the relationship evidence; this remains a semantic model
+judgment, not a deterministic guarantee that selected sentences prove the link.
+Earlier source quote and revision validation remains unchanged.
 
 `SEREIN_AML_SEARCH_INPUT_BYTES` defaults to **24000 UTF-8 bytes**, clamped to
 4000..60000. When this mode is enabled, Search model prompts and serialized

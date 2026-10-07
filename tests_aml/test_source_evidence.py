@@ -25,10 +25,14 @@ def test_settled_sources_and_dates_reach_final_search_without_new_storage(memory
     prompts=[]
     def model(prompt):
         prompts.append(prompt)
+        if len(prompts)==1:
+            packet=json.loads(prompt.split('\nEVIDENCE: ',1)[1])
+            assert 'missing income statement' not in prompt
+            return {'read_sources':[{'ref':packet[0]['ref'],'gap':'Missing application rejection reason'}]}
         return pick_all(prompt)
     monkeypatch.setattr(engine, '_model_json', model)
     result=search()
-    assert len(prompts)==1 and len(result)==1
+    assert len(prompts)==2 and len(result)==1
     text=result[0]['content']
     assert 'missing income statement' in text and '2023-12-31' in text
     assert '13812345678' not in text and 'not-a-real-secret' not in text
@@ -146,6 +150,41 @@ def test_defaults_preserve_existing_search(memory, monkeypatch):
     monkeypatch.delenv('SEREIN_AML_SOURCE_EVIDENCE',raising=False)
     monkeypatch.setattr(evidence,'select',lambda *a: pytest.fail('opt-in only'))
     assert search()[0]['content']=='Alice moved to Paris.'
+
+
+def test_body_sufficient_does_not_send_extra_originals(memory, monkeypatch):
+    add([{'role':'user','timestamp':1704067200000,'content':'Alice moved to Paris.'},
+         {'role':'assistant','timestamp':1704067260000,'content':'UNNECESSARY_ORIGINAL_DETAIL'}])
+    monkeypatch.setenv('SEREIN_AML_SOURCE_EVIDENCE','1')
+    prompts=[]
+    def model(prompt):
+        prompts.append(prompt)
+        assert 'UNNECESSARY_ORIGINAL_DETAIL' not in prompt
+        return pick_all(prompt)
+    monkeypatch.setattr(engine,'_model_json',model)
+    assert 'Paris' in search()[0]['content']
+    assert len(prompts)==1
+
+
+def test_original_request_is_bounded_and_revocation_checked(memory, monkeypatch):
+    add()
+    monkeypatch.setenv('SEREIN_AML_SOURCE_EVIDENCE','1')
+    prompts=[]
+    def model(prompt):
+        prompts.append(prompt)
+        packet=json.loads(prompt.split('\nEVIDENCE: ',1)[1])
+        result=pick_all(prompt)
+        result['read_sources']=[{'ref':packet[0]['ref'],'gap':'Need source detail'}]
+        return result
+    monkeypatch.setattr(engine,'_model_json',model)
+    assert search() and len(prompts)==2
+    prompts.clear()
+    def revoked(prompt):
+        with Store(engine._paths('user-a').database) as store:
+            store.conn.execute('UPDATE evidence_bindings SET active=0')
+        return model(prompt)
+    monkeypatch.setattr(engine,'_model_json',revoked)
+    assert search()==[] and len(prompts)==1
 
 
 def test_scene_and_event_sharing_sources_are_not_duplicate_evidence(memory,monkeypatch):
