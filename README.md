@@ -4,6 +4,51 @@ Serein adapted for the **Agent Memory Leaderboard (Cycle 2, Textual Memory)**.
 
 This repository imports the published Serein backend from commit `b5b13800ad086ea763afd9008ef3bdbfbb83c75b` (public release `0.1.0-rc65`) and keeps the competition changes separate and auditable.
 
+## 流程图与设计论文
+
+[AML 完整流程图与比赛边界](docs/aml-flow.md) · [公开版流程图](docs/aml-flow.md#公开版设计图) · [论文 PDF](docs/paper/pdf/event-memory-paper.zh-CN.pdf) · [论文 Markdown](docs/paper/manuscript.zh-CN.md) · [图表与阅读说明](docs/paper/README.md)
+
+```mermaid
+flowchart LR
+    A["Add：历史消息"] --> B["原话归档与 Track 归线"]
+    B --> C["Curator / Writer 形成 Event"]
+    C --> D["记忆索引与可选叙事材料目录"]
+    Q["Search：明确问题"] --> R["混合检索"]
+    D --> R
+    R --> S["有缺口时读菜单材料"]
+    S --> T["正文优先，必要时回读原话"]
+    T --> U["返回有出处的证据片段"]
+    U --> V["平台固定的回答与评分"]
+```
+
+图示包含可选路径，具体开关见下文。论文《**从交错对话到可追溯 Event：持续归线、延迟结算与来源归属的系统案例研究**》由 **ChiYouyu · Haven** 署名，随附中文 v0.19 阅读版及补充材料。它记录设计、历史实验和失败案例，**不是 AML 成绩报告**。比赛版已简化部分编辑审查与引用协议；论文原有实验条件和结论保持不变，差异见[流程说明](docs/aml-flow.md#论文与比赛版的关系)。
+
+## What this leaderboard result covers
+
+AML evaluates this adapter's synchronous conversation ingestion and question-driven
+text retrieval: preserving useful facts across supplied histories and returning
+evidence for explicit questions. The score reflects the selected models, enabled
+features, returned-text budget and the benchmark's downstream answer/scoring path;
+it is not a score for every Serein capability. Smoke completion is a compatibility
+check, not proof of semantic accuracy or a completed full evaluation.
+
+| Capability | Coverage in this integration |
+| --- | --- |
+| Original archive, Track routing, Event writing, lexical/vector retrieval and reranking | Used by Add/Search; evaluated through their effect on returned evidence and answers, not independently graded |
+| Tagging, automatic Arc grouping, Narrative authoring/menu reading and bounded gap search | Used only when enabled; an aggregate score does not isolate their contribution |
+| When to surface a memory or remain silent in ordinary conversation | Not evaluated: Search explicitly uses lookup mode |
+| Repeated-delivery cooldown, normal two-card delivery limit and new-chat resume | Not exercised by this lookup adapter |
+| Human editing, protected/manual memory lifecycle and Narrative read/preview/save conflict handling | Host contracts remain enforced, but this benchmark is not a dedicated lifecycle or concurrency test |
+| Scene creation, multimodal understanding, long-running companionship and proactive behavior | Not established by textual Add/Search results |
+
+The competition uses gpt-4o-mini for generation. Its ability to follow long
+instructions, emit strict structures and distinguish activity boundaries is a
+practical limitation. The disclosed simplified profile uses short Router/Curator/
+Writer tasks and removes optional editorial reviews and citation gates. It does
+not claim to benchmark Serein's strict editorial/citation protocol. Source
+accounting, user isolation, ownership, lifecycle and save conflicts remain host
+checks; generated summaries and routing decisions can still be wrong.
+
 ## Public backend baseline
 
 The baseline imported 232 files under `src/serein/`; selected later public patches now bring the backend to 233 files. The base commit remains pinned, and every applied backend patch and its paths are recorded in [`upstream-serein.json`](upstream-serein.json). The import includes Event continuation and evidence handling, recoverable processing stages, grounded narrative candidate discovery, diary search, and separate Event/Scene domain rules.
@@ -60,6 +105,98 @@ Both automatic organization and menu expansion are opt-in. `SEREIN_AML_ORGANIZE_
 `SEREIN_AML_WRITE_NARRATIVES=1` adds a separate benchmark authoring step after Scout and enables organization automatically. It uses the selected `writer` model (the development assignment or competition mini) to write coherent prose from the public frozen source snapshot. Bound original messages are preferred to derived Event/Scene summaries. The Writer sees short, task-local source refs with no separate material IDs; exact aliases map back to the frozen original refs before unchanged quote/material validation. Unknown aliases and quotes from a different source remain invalid. Each paragraph carries validated exact source refs and quotes in the local authoring receipt; the model remains responsible for semantic faithfulness. All bound materials must be represented. The existing Narrative `read → preview → save` checks still validate source snapshots, document hashes and revisions before publishing the exact draft. Scout remains material-only, and the public preview/save contract is retained.
 
 New collecting volumes are authored; previously AML-authored volumes are rewritten from all current bound sources when those sources or the topic change. This uses `rewrite`, because Scout has already appended new membership before Writer runs. Unchanged inputs and bodies skip generation; independently authored or manually edited prose is preserved. Pending collecting volumes are revisited even when Scout now reports unchanged. The published revision and AML acknowledgment commit together, so a retry after a later index failure cannot publish twice. Add stays pending on writing/preview/save failure, and source conflicts require a fresh read and draft. Narrative prose is refreshed in the lexical index; the public vector/passage indexes cover Event and Scene. Search can select menu index 0 for a relevant completed Narrative, or select individual materials and decline irrelevant menus. Automatic writing and menu expansion are independently opt-in; use both to exercise the complete route.
+
+`SEREIN_AML_SIMPLIFY_AUTHORING=1` opts into shorter benchmark Writer instructions.
+Event Writer needs only `evidence_sufficient`, `title`, and `event_draft`; the host
+supplies empty detail lists and an empty self-review object when absent, without
+inventing assessment booleans. Frozen source blocks, attachment data, ownership,
+append budgets and existing bodies still pass the public pipeline checks. Optional
+model claim/sentence receipts are discarded before settlement rather than triggering
+rewrites; the literal model reply remains audited. Tagging and Search are unchanged.
+Router removes a redundant context reference equal to that message's own primary
+Track. A nonempty, unique list of already-declared valid context Tracks determines
+the redundant `bridge` role marker; the adapter preserves primary/context references
+and never inserts a cross-Track link. If a used existing Track has no update row,
+the adapter carries its frozen subject, throughline, policy and status unchanged.
+Explicit model updates win, and a new Track still needs a model-authored card.
+For generated `session_*_track_NNNN` IDs, zero-padding differences are resolved
+only to a unique canonical ID in the frozen available cards with the same session
+and numeric ordinal. Exact IDs win; ambiguous, foreign-session and unknown IDs
+remain invalid. Literal replies stay in the stage journal, and accepted Router
+format changes are recorded separately in `aml_router_normalizations`.
+Foreign Tracks, duplicate references, unsupported roles and a `bridge` with no
+distinct context still fail public validation. Curator has a format adapter: explicit disposition objects misplaced
+in integer root lists move to their review rows. Redundant skip/defer declarations
+for known read-only context units are removed from both lists and review rows;
+their original messages remain unprocessed and searchable. Stable-unit decisions,
+unknown IDs, overlapping ownership and parked ownership still pass through the
+unchanged public validation. This does not infer a disposition or force admission.
+Stage-format validation permits at most three rejected model replies per durable
+job across automatic Add retries, including empty replies. Exhaustion leaves Add
+pending and lets the public host pause the batch, without further model rewrites.
+An explicit public `retry_batch` resets that budget after repair. Curator coverage
+omissions retain the existing public targeted-repair and original-retention path.
+Narrative Writer may omit repetition or asides instead of citing every bound
+material, and need not follow a prescribed viewpoint or layout. Extra presentation
+fields are ignored; Markdown heading words become prose so they cannot create
+public volume section boundaries. Narrative output needs only `{"body":"prose"}`;
+legacy paragraph output is also accepted without inspecting its citation fields.
+Quotation mismatches, invented citation refs, omitted citations and incomplete
+material citation no longer trigger Writer retries in this mode. The authoring
+receipt records empty evidence with `citation_validation=not_performed`, without
+claiming the generated prose or model quotations were verified. Frozen material
+binding/hash, document revisions and preview/save conflicts still apply. This trades
+sentence-level citation checks and exhaustive coverage for editorial selection;
+it does not establish that all answer-relevant facts survived summarization.
+All bound materials remain
+available through the menu. The option defaults off and is part of the database
+profile: use a fresh empty data directory and a separately disclosed version when
+enabling it. Do not switch it during an evaluation. Raw model replies remain audited.
+
+`SEREIN_AML_RELAX_CONTENT_REVIEW=1` additionally opts out of editorial acceptance
+gates when simplified authoring is enabled. Curator gets a shorter compact task
+with the exact frozen source input; activity classification, boundary/disposition
+reasons and quotes, bridge/continuation reviews, material-use audits, round admission,
+and the one-Event editorial limit for rolling Tracks no longer trigger rewrites.
+Unverified `decision_review` is archived in the literal reply but excluded from the
+settled plan. Writer requires usable title/body and the evidence-sufficient flag;
+self-review/detail/citation scaffolding is ignored. The public default remains strict,
+and the policy is scoped to each asynchronous pipeline task.
+
+Router also receives one short task with the unchanged frozen Track cards, raw
+messages and recent-context block. It chooses one primary activity per message;
+same-Track replies have no context edge, and only an explicit connection to a
+different Track is a bridge. The model need not repeat unchanged existing cards.
+A contradictory self-context bridge still requires a corrected model decision;
+the host does not guess a replacement role or manufacture a second Track. This
+prompt simplification preserves the existing profile, saved requests and public
+validation, so paused jobs can use public retry without replacing their database.
+
+Scout uses the public normalizer's bounded safe candidate subset rather than asking
+the model to restore discarded candidates or justify them. Its audit records the
+proposed count and accepted candidates. Invalid source/target references are still
+filtered, never invented or bound. JSON/usable-content errors and provider failures
+can still fail a write; this option does not promise that every model output can save.
+Atomic ownership, complete source accounting, read-only context boundaries, user
+isolation, predecessor/lifecycle checks, append limits, idempotency, actual indexing,
+and Narrative read/preview/save remain enforced. Original sources stay available;
+generated summaries have no additional semantic accuracy guarantee.
+
+This is the `lite-v3-content` authoring profile. It requires fresh empty storage and
+a separately disclosed evaluation version; do not resume a v2 evaluation against
+it. Keep the old database and logs for diagnosis and rollback.
+
+In this profile, compact `create` proposals use only their declared writable roots.
+Known read-only roots are filtered without substituting any source ID. A proposal
+with no writable roots is discarded; predecessor-based operations, unknown IDs,
+foreign Tracks and duplicate writable roots retain validation. The accepted subset
+and original decision are stored in `aml_curator_normalizations`; the literal model
+reply is still archived unchanged. Unselected/skipped originals stay retrievable,
+and read-only tails stay unprocessed. This format recovery keeps the existing v3
+profile and data compatible; it does not convert an invalid proposal into a memory.
+An empty-source proposal may name another Track explicitly present in the frozen
+memberships; that entire proposal is also discarded, without admitting that Track
+as a valid primary owner. Mixed proposals still require an allowed primary Track.
 
 Before returning a volume body, Search also checks that its current Event/Scene materials are readable and allowed for the original question. AML-authored prose must still match its committed source snapshot, selected membership, title/focus and body hash. Changed or newly linked materials suppress the old prose until it is rewritten; independently eligible individual materials remain available.
 
@@ -124,6 +261,89 @@ questions, comparing coverage, noise and runtime. Official Smoke is a separate
 compatibility check for synchronous Add/Search and scoring; it is not a
 retrieval-development dataset. Respect the official evaluation-data restrictions.
 
+## Bounded source evidence (opt-in)
+
+`SEREIN_AML_SOURCE_EVIDENCE=1` adds a Search-only evidence-reading path on top of
+the existing mixed recall and optional Arc/gap routes. It does not rewrite Events,
+create Scenes or a rolling global summary, change the storage profile, or save
+Search questions. Keep it off for an already frozen evaluation version; disclose
+the flag and code revision for a new evaluation.
+
+For numeric ISO/Chinese date ranges, or an explicitly dated `as of`/`截至` query
+with a numeric past-day/month interval, Search can add up to 100 active Events
+with matching **source-message dates**, even without a lexical match. The raw
+timestamp must have source provenance. This is not an event-occurrence-date index:
+a later recollection of an old event may enter the window. Missing question dates
+are never replaced by the server clock. Dates in prose and message timestamps are
+labelled separately for interpretation. Relative yesterday/today/tomorrow dates
+use the recorded timestamp's offset; no sender timezone is inferred. Arithmetic
+between two explicit dates reports elapsed calendar days, not inferred causality
+or inclusive-day counts.
+
+Matched Event/Scene records can read their bound AML originals, including settled
+messages excluded from the pending-original fallback. Reads verify the current
+binding, source content hash, raw visibility and timestamp provenance. Up to 24
+source bindings and 24 sentence units per record retain early and late material.
+Changed/discarded sources cannot fall back to their old summary. Current Narrative
+material snapshots are rechecked after selection. Shared Scene/Event source units
+are deduplicated. Existing paired expansion evidence must still survive together.
+
+Selection starts with memory bodies. Local binding/visibility checks still read
+source snapshots, but extra original text is not sent to the model by default.
+One additional model call chooses existing sentence IDs rather than writing an
+answer. If a body lacks a specific fact, transition or time reference, it may
+request originals for up to four records; one bounded follow-up selection reads
+those originals, without a further reading or correction loop. The short task
+asks it to retain intermediate steps, corrections,
+cancellations and unresolved conflicts. Optional state labels are explicitly
+model-assessed, not proof of a current fact. The host renders body/source excerpts,
+speaker/message dates and date normalization. Invalid selections fail closed;
+there is no automatic paid correction loop. All results state partial coverage:
+candidate, input and output limits may omit relevant history. A complete global
+summary or reliable current-state resolution is not guaranteed. Final expansion
+retention requires both reviewed records, not verbatim repetition of an Event
+sentence in its differently worded original. The selector receives linked IDs
+and must preserve the relationship evidence; this remains a semantic model
+judgment, not a deterministic guarantee that selected sentences prove the link.
+Earlier source quote and revision validation remains unchanged.
+
+With this option, evidence assessment, gap-search anchors and joint bridge review
+use locally numbered sentence units. The model selects a unit ID instead of
+copying its text; the host resolves the ID to the original sentence before the
+existing source/relationship checks. IDs are scoped to their record and current
+request; unknown IDs are rejected without a repair loop. Legacy exact-quote
+responses remain compatible, but the new prompts ask only for IDs. Units over
+800 characters are omitted and the packet marks partial coverage. This reduces
+copying/format errors, not semantic mistakes. See
+[the migration note](NUMBERED_EVIDENCE_NOTES.md) for public/self-hosted follow-up.
+
+`SEREIN_AML_SEARCH_INPUT_BYTES` defaults to **24000 UTF-8 bytes**, clamped to
+4000..60000. When this mode is enabled, Search model prompts and serialized
+reranker query/documents must fit that bound; a question/options payload over
+half that allowance returns HTTP 422 before retrieval. Evidence units are packed
+across records; oversized units are omitted, not silently split into misleading
+quotes. Existing `top_k` and `SEREIN_AML_CONTEXT_CHAR_CAP` still bound the final
+response. These limits describe application text, excluding provider protocol and
+model-runtime overhead. They do not change Add-stage prompt limits.
+
+Before Search model/reranker calls, labelled password/key/token values are
+redacted, and labelled phone/email/ID/detailed-address fields are minimized when
+not requested. The final selector also omits unrelated or explicitly restricted
+personal details; requesting a field does not establish authorization. This is a
+bounded disclosure aid, **not** a general PII detector or recipient authorization
+system. Unlabelled sensitive details and semantic privacy decisions still depend
+on the model. Original storage is unchanged; `[redacted]` marks altered excerpts.
+The fixed API still has no recipient/purpose authorization field. No instructions
+are injected into platform Answer; returned content is evidence and provenance.
+
+Development validation uses synthetic histories and gpt-6-sol at medium effort,
+not recorded evaluation questions. Deterministic tests cover source revocation,
+time-window retrieval, unknown time, budget rejection, default-off compatibility
+and source deduplication. Model probes cover latest-state corrections, intermediate
+steps, cross-topic history, relative dates, unresolved conflict and restricted
+third-party contact information. These checks do not establish competition-mini
+quality or an official score.
+
 ## API
 
 - `GET /health` — unauthenticated health endpoint.
@@ -177,6 +397,10 @@ Optional:
 The formal AML request may use `top_k=100`; the local return cap can be tuned up to 100 while always respecting the requested maximum. The context cap counts characters across all returned `content` fields, not tokens. Set `SEREIN_AML_EXPAND_ARCS=1` to enable menu selection; it is disabled by default and never reads a whole volume implicitly. The retrieval model may decline to expand any menu. Invalid or changed selections are ignored.
 
 Writing and tagging are part of the database profile. Use a fresh empty data directory when enabling or disabling `SEREIN_AML_WRITE_NARRATIVES` or `SEREIN_AML_TAG_MEMORIES`; neither Add nor Search can silently switch an existing database across that boundary.
+
+With the relaxed content profile, Scout selects at most eight recent seeds and four candidates per seed, ordering candidates by the reciprocal ranks of their keyword/entity/semantic retrieval routes. It gives each seed its strongest connection first, includes only pairs fitting a single 60,000-byte UTF-8 input budget, and sends each material's text once. Initial selection leaves 2,048 bytes for validation feedback; any correction reply excerpt is trimmed to keep the subsequent input within the same budget. Generation reserves at most 4,096 output tokens. Unselected materials remain canonical and searchable; source references outside the selected packet are not admitted by normalization. These limits may omit useful grouping candidates. Provider HTTP failures record their status and input size without storing provider error bodies. Source bindings and canonical original reads remain enforced. The simplified Event Writer uses neutral user/assistant display labels rather than the public edition's fixed viewpoint labels; original text, roles, IDs and evidence ownership are preserved.
+
+`SEREIN_AML_TRACK_CANDIDATES=1` enables the unchanged public Router candidate selector. `SEREIN_AML_TRACK_DIRECT_HOURS` defaults to 12 (allowed: 12/24/48/72); `SEREIN_AML_TRACK_CANDIDATE_LIMIT` defaults to 8 (1–50). Recent Track cards are included directly, while older cards within the public lookback are selected by local jieba/BM25 over new dialogue, nearby context, titles, continuation clues and recent originals. This changes Router input only, not Search's historical memory availability or Scout's material inventory. Missing source timestamps fall back to including the available cards; ingestion time does not establish the real age of undated source material. Enabling or changing this selection requires a fresh AML profile/database. It does not alter already frozen jobs.
 
 Semantic lookup uses the public theme-discovery candidate floor of 0.3 cosine. Final reranking considers at most 100 admitted candidates, including explicitly chosen Arc materials. This is a candidate threshold, not a calibrated relevance claim. Preparing routes and vectors for the first Add can be slow; provision caller timeouts accordingly. Add remains pending if the Event pipeline, metadata tagging, index fill, enabled Scout or authoring fails, and the same `request_id` can be retried without duplicating archived originals.
 

@@ -14,6 +14,7 @@ from .pipeline_audit import canonicalize_claim_group_ids, writer_receipt_errors,
 from . import pipeline_materials
 from .pipeline_continuity import validate_bridge_owners, validate_continuations
 from . import pipeline_admission
+from .pipeline_policy import editorial_review_enabled
 _identity = ContextVar('pipeline_identity', default={'user_name':'User','ai_name':'AI'})
 @contextmanager
 def identity_scope(names):
@@ -548,7 +549,7 @@ def _normalize_expanded_event_curator_output(output: dict[str, Any], component: 
         binding_ids = {item['source_message_id'] for item in bindings}
         if not selected_source_ids.issubset(binding_ids):
             raise ValueError('Track Curator old+new source union omitted a base source')
-        if not any((item['activity_role'] == 'primary_activity' for item in bindings)):
+        if editorial_review_enabled() and not any((item['activity_role'] == 'primary_activity' for item in bindings)):
             raise ValueError('every Event must have an owned primary_activity')
         if selected_candidates and not (binding_ids & (stable_ids-selected_source_ids)):
             touched=[item['source_message_id'] for item in bindings if item['source_message_id'] in stable_ids]
@@ -600,7 +601,7 @@ def _normalize_expanded_event_curator_output(output: dict[str, Any], component: 
     if accounted != stable_ids:
         raise CuratorCoverageError(sorted(stable_ids - accounted))
     for track_id, event_policy in event_policy_by_track.items():
-        if event_policy != 'rolling_engineering':
+        if not editorial_review_enabled() or event_policy != 'rolling_engineering':
             continue
         rolling_events = [item for item in events if item['primary_track_id'] == track_id]
         if len(rolling_events) > 1:
@@ -625,12 +626,17 @@ def _normalize_expanded_event_curator_output(output: dict[str, Any], component: 
 
 def normalize_event_curator_output(output: dict[str, Any], component: dict[str, Any]) -> dict[str, Any]:
     """Expand the compact model decision, then enforce the existing host contract."""
-    review = canonicalize_curator_review(output.get('decision_review'))
+    review = canonicalize_curator_review(output.get('decision_review')) if editorial_review_enabled() else None
     output = {key: value for key, value in output.items() if key != 'decision_review'}
     payload_keys = set(output).difference({'_splitter_provider', '_splitter_model', '_splitter_provider_index', '_track_context_receipt', '_codex_job'})
     if payload_keys == {'events', 'skip_unit_roots', 'defer_unit_roots'}:
         output = _expand_compact_event_curator_output(output, component)
     normalized = _normalize_expanded_event_curator_output(output, component)
+    if not editorial_review_enabled():
+        # Preserve literal model reviews in pipeline_attempts, but do not pass
+        # unchecked annotations to Writer as verified material decisions.
+        normalized.update(decision_review=None, event_admissions={}, editorial_validation='not_performed')
+        return normalized
     validate_bridge_owners(output, component, review)
     errors = curator_receipt_errors(review, output, component)
     if errors:
@@ -749,6 +755,21 @@ def build_event_writer_repair_prompt(original_prompt, failed_result, violations)
 
 
 def validate_event_writer_result(result: dict[str, Any], owned_sources: list[dict[str, Any]] | None = None) -> list[str]:
+    if not editorial_review_enabled():
+        sufficient = result.get('evidence_sufficient')
+        title, body = result.get('title'), result.get('event_draft')
+        if type(sufficient) is not bool:
+            return ['evidence_sufficient 缺失或不是布尔值']
+        if sufficient is False:
+            return [] if not title and not body else ['证据不足时不得返回 Event 内容']
+        errors = []
+        if not isinstance(title, str) or not title.strip():
+            errors.append('标题为空或不是文本')
+        if not isinstance(body, str) or not body.strip():
+            errors.append('正文为空或不是文本')
+        elif len(body) > EVENT_BODY_ACCEPT_MAX_CHARS:
+            errors.append(f'正文超过容错上限 {EVENT_BODY_ACCEPT_MAX_CHARS} 字')
+        return errors
     canonicalize_claim_group_ids(result)
     title = str(result.get('title') or '').strip()
     body = str(result.get('event_draft') or '').strip()

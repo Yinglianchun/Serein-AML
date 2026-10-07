@@ -6,6 +6,9 @@
   "backend_prefix": "src/serein/",
   "backend_file_count": 233,
   "local_overrides": {
+    "src/serein/extensions/pipeline_policy.py": "Task-local editorial review opt-out; defaults strict and does not change source ownership or storage validation",
+    "src/serein/extensions/pipeline_latest.py": "Opt-in AML content policy bypasses Curator editorial receipts/activity gates and Writer review scaffolding while preserving structural ownership and usable-body checks",
+    "src/serein/extensions/pipeline_admission.py": "Respect task-local editorial review opt-out without applying the optional Writer round gate",
     "src/serein/adapters/embedding.py": "Split text-embedding-v4 document and query transport into at most ten inputs per request, preserving all inputs, query/document instructions and per-request response-position validation; other models retain their existing behavior",
     "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
     "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks",
@@ -124,5 +127,29 @@
         "tests/test_track_continuation_parity.py"
       ]
     }
-  ]
+  ],
+  "documentation_import": {
+    "repository": "https://github.com/Yinglianchun/Serein",
+    "commit": "c673cb6141e1d1122b8dcb1f8ebb66b8d8c857c5",
+    "files": [
+      "docs/paper/README.md",
+      "docs/paper/figures/figure-1-system-flow.svg",
+      "docs/paper/figures/figure-2-source-continuity.svg",
+      "docs/paper/manuscript.zh-CN.md",
+      "docs/paper/pdf/event-memory-paper.zh-CN.pdf",
+      "docs/paper/pdf/event-memory-supplementary-tables.zh-CN.pdf",
+      "docs/paper/pdf/figure-1-system-flow.pdf",
+      "docs/paper/pdf/figure-2-source-continuity.pdf",
+      "docs/paper/pdf/serein-event-memory-v0.18-ChiYouyu-Haven.zh-CN.pdf",
+      "docs/paper/supplementary-tables.md",
+      "docs/paper/typesetting/build_reading_pdf.py",
+      "docs/images/automatic-events.svg",
+      "docs/images/memory-storage.svg",
+      "docs/images/recall-flow.svg"
+    ],
+    "local_overrides": {
+      "docs/paper/README.md": "Clarify AML scope and link the upstream automatic Event documentation"
+    },
+    "note": "Documentation snapshot only; does not update the backend baseline or claim AML evaluation results."
+  }
 }

@@ -126,7 +126,9 @@ def test_scout_appended_material_is_read_in_full_rewrite_mode(author_memory):
 
 
 @pytest.mark.parametrize("boundary", ["preview", "save"])
-def test_changed_source_conflicts_without_publishing_stale_draft(author_memory, monkeypatch, boundary):
+@pytest.mark.parametrize("simplified", [False, True])
+def test_changed_source_conflicts_without_publishing_stale_draft(author_memory, monkeypatch, boundary, simplified):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1' if simplified else '0')
     settings, _, complete = author_memory
     if boundary == "preview":
         async def changed(model, payload, **kwargs):

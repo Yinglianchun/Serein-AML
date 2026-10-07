@@ -99,6 +99,32 @@ def test_missing_relation_reads_once_then_retains_low_similarity_joint_evidence(
     assert len(observed["reranks"]) == 2
 
 
+def test_source_selection_keeps_bridge_without_repeating_full_review_quote(planned, monkeypatch):
+    paths,_=planned
+    with Store(paths.database) as store:
+        doc=store.read('bridge')
+        store.revise('bridge',expected_revision=doc['revision'],title=doc['title'],
+                     body_md='Oriole Atelier moved to Valencia on May 2. Its shelves are orange.',metadata=doc['metadata'])
+    from serein.recall.index import refresh_index
+    refresh_index(paths.database,paths.index,['bridge'])
+    monkeypatch.setenv('SEREIN_AML_SOURCE_EVIDENCE','1')
+    def model(prompt):
+        if '\nEVIDENCE: ' in prompt:
+            packet=json.loads(prompt.split('\nEVIDENCE: ',1)[1])
+            assert all(row['linked_refs'] for row in packet)
+            return {'selections':[{'ref':row['ref'],'units':[row['units'][0]['id']]} for row in packet]}
+        if 'READS:\n' in prompt:
+            reads=json.loads(prompt.split('READS:\n',1)[1])
+            return {'accepted':[{'selection':item['selection'],
+                'anchor_quote':' '.join(unit['text'] for unit in item['anchor']['units']),
+                'quote':' '.join(unit['text'] for unit in item['material']['units'])} for item in reads]}
+        return reviewer(prompt) if 'READS:\n' in prompt else chooser(prompt)
+    monkeypatch.setattr(engine,'_model_json',model)
+    found=search()
+    assert {r['id'] for r in found}=={'anchor','bridge'}
+    assert 'Valencia' in str(found) and 'shelves' not in str(found)
+
+
 def test_read_review_rejects_shared_topic_without_reserved_slots(planned, monkeypatch):
     _, observed = planned
     def decide(prompt):

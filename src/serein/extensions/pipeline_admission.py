@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from .pipeline_materials import substantive_ids
+from .pipeline_policy import editorial_review_enabled
 
 
 def add_lookahead(components):
@@ -70,7 +71,7 @@ def count_rounds(owned_ids, messages):
 
 
 def validate(review, output, component):
-    if not component.get('writer_round_gate'):
+    if not editorial_review_enabled() or not component.get('writer_round_gate'):
         return {}
     if not isinstance(review, dict) or not isinstance(review.get('events'), list):
         raise ValueError('Round admission needs per-Event decisions')
@@ -100,7 +101,7 @@ def validate(review, output, component):
 
 def apply_gate(plan, component):
     """Short open activities remain pending; an explicitly closed short activity is skipped."""
-    if not component.get('writer_round_gate'):
+    if not editorial_review_enabled() or not component.get('writer_round_gate'):
         return plan
     result = deepcopy(plan)
     scope = {int(row['id']): row for row in component.get('context_messages') or []}

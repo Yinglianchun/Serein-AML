@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="530" viewBox="0 0 600 530" role="img" aria-labelledby="title desc">
+  <title id="title">Scene 和 Event 如何保存</title>
+  <desc id="desc">主窗口主动写下 Scene，自动摘要任务根据已入库原话整理 Event。两者的正文、版本与状态存入同一个 SQLite 主库。原话单独归档并与记忆绑定；检索索引另行保存，可以重新准备。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 8 5 1 9" fill="none" stroke="#72918a" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="600" height="530" rx="20" fill="#f8faf9"/>
+  <g font-family="'Noto Sans CJK SC','Microsoft YaHei','PingFang SC',sans-serif" text-anchor="middle">
+    <text x="300" y="43" font-size="20" fill="#60716b">两种写法，同一份记忆库</text>
+    <rect x="28" y="72" width="256" height="164" rx="14" fill="#edf4f1" stroke="#c5d7cf"/>
+    <text x="156" y="112" font-size="22" fill="#365b55">主窗口主动写</text>
+    <text x="156" y="162" font-size="36" fill="#243f39">Scene</text>
+    <text x="156" y="203" font-size="20" fill="#52645d">想留下的片段与理解</text>
+    <rect x="316" y="72" width="256" height="164" rx="14" fill="#f4f1eb" stroke="#d9d1c2"/>
+    <text x="444" y="112" font-size="22" fill="#736244">原话 → 自动摘要</text>
+    <text x="444" y="162" font-size="36" fill="#50432f">Event</text>
+    <text x="444" y="203" font-size="20" fill="#716958">发生的事与对话进展</text>
+    <path d="M156 237 V261 Q156 276 171 276 H429 Q444 276 444 261 V237 M300 276 V303" fill="none" stroke="#72918a" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="90" y="310" width="420" height="108" rx="14" fill="#fff" stroke="#c5d7cf"/>
+    <text x="300" y="355" font-size="28" fill="#243f39">SQLite 记忆主库</text>
+    <text x="300" y="393" font-size="22" fill="#52645d">独立 ID · 正文 · 版本 · 状态</text>
+    <text x="300" y="463" font-size="20" fill="#52645d">原话单独归档，通过绑定回到记忆</text>
+    <text x="300" y="498" font-size="20" fill="#52645d">检索索引另行保存，可以重新准备</text>
+  </g>
+</svg>
