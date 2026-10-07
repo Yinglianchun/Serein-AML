@@ -288,6 +288,16 @@ and must preserve the relationship evidence; this remains a semantic model
 judgment, not a deterministic guarantee that selected sentences prove the link.
 Earlier source quote and revision validation remains unchanged.
 
+With this option, evidence assessment, gap-search anchors and joint bridge review
+use locally numbered sentence units. The model selects a unit ID instead of
+copying its text; the host resolves the ID to the original sentence before the
+existing source/relationship checks. IDs are scoped to their record and current
+request; unknown IDs are rejected without a repair loop. Legacy exact-quote
+responses remain compatible, but the new prompts ask only for IDs. Units over
+800 characters are omitted and the packet marks partial coverage. This reduces
+copying/format errors, not semantic mistakes. See
+[the migration note](NUMBERED_EVIDENCE_NOTES.md) for public/self-hosted follow-up.
+
 `SEREIN_AML_SEARCH_INPUT_BYTES` defaults to **24000 UTF-8 bytes**, clamped to
 4000..60000. When this mode is enabled, Search model prompts and serialized
 reranker query/documents must fit that bound; a question/options payload over

@@ -113,6 +113,11 @@ def test_source_selection_keeps_bridge_without_repeating_full_review_quote(plann
             packet=json.loads(prompt.split('\nEVIDENCE: ',1)[1])
             assert all(row['linked_refs'] for row in packet)
             return {'selections':[{'ref':row['ref'],'units':[row['units'][0]['id']]} for row in packet]}
+        if 'READS:\n' in prompt:
+            reads=json.loads(prompt.split('READS:\n',1)[1])
+            return {'accepted':[{'selection':item['selection'],
+                'anchor_quote':' '.join(unit['text'] for unit in item['anchor']['units']),
+                'quote':' '.join(unit['text'] for unit in item['material']['units'])} for item in reads]}
         return reviewer(prompt) if 'READS:\n' in prompt else chooser(prompt)
     monkeypatch.setattr(engine,'_model_json',model)
     found=search()
