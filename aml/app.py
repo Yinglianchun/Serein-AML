@@ -108,4 +108,6 @@ def search(
         data = search_memory(query=payload.query, options=payload.options, user_id=payload.user_id, top_k=payload.top_k)
     except ProfileConflict as exc:
         raise HTTPException(status_code=409, detail={"reason": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"reason": str(exc)}) from exc
     return SearchResponse(data=[SearchItem(**item) for item in data])

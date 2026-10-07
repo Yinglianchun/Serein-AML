@@ -31,6 +31,7 @@ from serein.recall.policy import RecallPolicy
 from serein.recall.query import Query
 from serein.recall.scene import domain_rejection
 from . import runtime, originals, bridges, narratives, arc_planning
+from . import evidence as source_evidence
 
 
 MODEL = "gpt-4o-mini"
@@ -92,6 +93,10 @@ def _json_from_model(text: str) -> dict[str, Any]:
 
 
 def _model_json(prompt: str) -> dict[str, Any]:
+    if source_evidence.enabled():
+        prompt = source_evidence.minimize(prompt)
+        if len(prompt.encode('utf-8')) > source_evidence.input_limit():
+            raise ValueError('AML Search model input byte limit exceeded')
     database = runtime.ACTIVE_DATABASE.get()
     if database:
         from serein.deployment import task_model
@@ -245,7 +250,12 @@ OPTIONS:
 def _recall_hits(services: Services, text: str, *, limit: int = 100, method: str | None = None) -> list[dict[str, Any]]:
     """Use the same service as MCP recall_memory, with explicit lookup intent."""
     settings = effective_settings(services._settings)
-    result = services.recall(text, mode="lookup", limit=limit, with_evidence=True,
+    recall = services.recall
+    if source_evidence.enabled() and settings.reranker:
+        from serein.recall.service import Recall
+        from serein.adapters.reranker import RerankerClient
+        recall = Recall(settings, reranker=source_evidence.safe_reranker(RerankerClient(**settings.reranker))).run
+    result = recall(text, mode="lookup", limit=limit, with_evidence=True,
                              method=method or ("semantic" if settings.embedding else "lexical"), min_cosine=.3, intent="direct")
     by_ref = {f"{hit['kind']}:{hit['id']}": hit
               for pool in result["pools"].values() for hit in pool["items"]}
@@ -353,7 +363,10 @@ def _rank_scores(prepared, query, candidates, scores):
     if not prepared.reranker or not candidates:
         return scores.copy()
     from serein.adapters.reranker import RerankerClient
-    reranked = RerankerClient(**prepared.reranker)(query, [
+    ranker = RerankerClient(**prepared.reranker)
+    if source_evidence.enabled():
+        ranker = source_evidence.safe_reranker(ranker)
+    reranked = ranker(query, [
         {"ref": key, "title": hit["document"]["title"] if hit["kind"] != "original" else "Pending original",
          "body": hit["document"]["body_md"] if hit["kind"] != "original" else hit["content"]}
         for key, hit in candidates.items()])
@@ -444,6 +457,8 @@ def _gap_candidate(services, prepared, query, searches, candidates):
 def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
     if not query.strip():
         return []
+    if source_evidence.enabled() and len(encode([query, options or []]).encode('utf-8')) > source_evidence.input_limit() // 2:
+        raise ValueError('AML Search question/options exceed the input budget')
     top_k = max(1, min(100, int(top_k)))
     paths = _paths(user_id)
     if not paths.database.exists() or not paths.index.exists():
@@ -468,6 +483,13 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
             add_ranked(_recall_hits(services, query, limit=100, method="semantic"), 1.25)
         for position, lexical_query in enumerate(plan["queries"]):
             add_ranked(_recall_hits(services, lexical_query, method="lexical"), 1.0 if position < 2 else 0.75)
+
+        timed = []
+        if source_evidence.enabled():
+            from serein.recall.service import Recall
+            with Reader(paths.database) as reader:
+                timed = source_evidence.time_candidates(reader, query, Recall(prepared).policy)
+            add_ranked(timed, 1.0)
 
         source_hits = originals.hits(prepared, query, plan["queries"] + plan["entities"])
         for rank, hit in enumerate(source_hits, 1):
@@ -665,6 +687,31 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
         valid_expansions = {key for group in valid_groups for key in group['ids']}
         records = {key: record for key, record in records.items() if key in direct_ids or key in valid_expansions}
         selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP))
+        if source_evidence.enabled():
+            # An explicit source-time history window gets coverage before ranking
+            # topical excerpts. It remains bounded and labels partial coverage.
+            if timed:
+                ids = list(dict.fromkeys([row['id'] for row in timed if row['id'] in records]+
+                                         [row['id'] for row in selected]))[:min(top_k, _RETURN_CAP)]
+                selected = [records[key] for key in ids]
+            with Reader(paths.database) as reader:
+                output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP)
+                # A model call can overlap an external source/material edit.
+                output = [row for row in output if candidates[row['id']]['kind'] != 'narrative' or
+                          narratives.readable_for_search(prepared, reader, row['id'], original_query, policy)]
+                fresh_groups = []
+                for group in valid_groups:
+                    if 'arc_key' in group:
+                        _, current_menus = _arcs(reader, [], arc_key=group['arc_key'])
+                        if current_menus.get(group['arc_key'], {}).get('menu_fingerprint') != group['menu_fingerprint']:
+                            continue
+                    fresh_groups.append(group)
+            returned = {row['id']: row['content'] for row in output}
+            accepted_expansions = {key for group in fresh_groups
+                if all(key in returned for key in group['ids']) and all(
+                    quote in returned.get(key, '') for key, quotes in group.get('focus', {}).items() for quote in quotes)
+                for key in group['ids']}
+            return [row for row in output if row['id'] in direct_ids or row['id'] in accepted_expansions]
         # Reserve space for every chosen record; one long volume must not crowd out other evidence.
         budget = _CONTEXT_CHAR_CAP
         allowances: dict[str, int] = {item['id']: 0 for item in selected}

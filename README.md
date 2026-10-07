@@ -242,6 +242,69 @@ questions, comparing coverage, noise and runtime. Official Smoke is a separate
 compatibility check for synchronous Add/Search and scoring; it is not a
 retrieval-development dataset. Respect the official evaluation-data restrictions.
 
+## Bounded source evidence (opt-in)
+
+`SEREIN_AML_SOURCE_EVIDENCE=1` adds a Search-only evidence-reading path on top of
+the existing mixed recall and optional Arc/gap routes. It does not rewrite Events,
+create Scenes or a rolling global summary, change the storage profile, or save
+Search questions. Keep it off for an already frozen evaluation version; disclose
+the flag and code revision for a new evaluation.
+
+For numeric ISO/Chinese date ranges, or an explicitly dated `as of`/`截至` query
+with a numeric past-day/month interval, Search can add up to 100 active Events
+with matching **source-message dates**, even without a lexical match. The raw
+timestamp must have source provenance. This is not an event-occurrence-date index:
+a later recollection of an old event may enter the window. Missing question dates
+are never replaced by the server clock. Dates in prose and message timestamps are
+labelled separately for interpretation. Relative yesterday/today/tomorrow dates
+use the recorded timestamp's offset; no sender timezone is inferred. Arithmetic
+between two explicit dates reports elapsed calendar days, not inferred causality
+or inclusive-day counts.
+
+Matched Event/Scene records can read their bound AML originals, including settled
+messages excluded from the pending-original fallback. Reads verify the current
+binding, source content hash, raw visibility and timestamp provenance. Up to 24
+source bindings and 24 sentence units per record retain early and late material.
+Changed/discarded sources cannot fall back to their old summary. Current Narrative
+material snapshots are rechecked after selection. Shared Scene/Event source units
+are deduplicated. Existing paired expansion evidence must still survive together.
+
+One additional model call chooses existing sentence IDs rather than writing an
+answer. The short task asks it to retain intermediate steps, corrections,
+cancellations and unresolved conflicts. Optional state labels are explicitly
+model-assessed, not proof of a current fact. The host renders source excerpts,
+speaker/message dates and date normalization. Invalid selections fail closed;
+there is no automatic paid correction loop. All results state partial coverage:
+candidate, input and output limits may omit relevant history. A complete global
+summary or reliable current-state resolution is not guaranteed.
+
+`SEREIN_AML_SEARCH_INPUT_BYTES` defaults to **24000 UTF-8 bytes**, clamped to
+4000..60000. When this mode is enabled, Search model prompts and serialized
+reranker query/documents must fit that bound; a question/options payload over
+half that allowance returns HTTP 422 before retrieval. Evidence units are packed
+across records; oversized units are omitted, not silently split into misleading
+quotes. Existing `top_k` and `SEREIN_AML_CONTEXT_CHAR_CAP` still bound the final
+response. These limits describe application text, excluding provider protocol and
+model-runtime overhead. They do not change Add-stage prompt limits.
+
+Before Search model/reranker calls, labelled password/key/token values are
+redacted, and labelled phone/email/ID/detailed-address fields are minimized when
+not requested. The final selector also omits unrelated or explicitly restricted
+personal details; requesting a field does not establish authorization. This is a
+bounded disclosure aid, **not** a general PII detector or recipient authorization
+system. Unlabelled sensitive details and semantic privacy decisions still depend
+on the model. Original storage is unchanged; `[redacted]` marks altered excerpts.
+The fixed API still has no recipient/purpose authorization field. No instructions
+are injected into platform Answer; returned content is evidence and provenance.
+
+Development validation uses synthetic histories and gpt-6-sol at medium effort,
+not recorded evaluation questions. Deterministic tests cover source revocation,
+time-window retrieval, unknown time, budget rejection, default-off compatibility
+and source deduplication. Model probes cover latest-state corrections, intermediate
+steps, cross-topic history, relative dates, unresolved conflict and restricted
+third-party contact information. These checks do not establish competition-mini
+quality or an official score.
+
 ## API
 
 - `GET /health` — unauthenticated health endpoint.
