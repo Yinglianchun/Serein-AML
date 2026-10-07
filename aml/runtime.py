@@ -46,8 +46,21 @@ def relaxed_content_review():
     return simplified_authoring() and os.getenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '0') == '1'
 
 
+def neutral_writer_sources(sources):
+    """Replace public viewpoint labels, never source text or evidence ownership."""
+    if '</event_reading_block_json>' not in sources:
+        return sources
+    block = sources.lstrip()
+    rows, end = json.JSONDecoder().raw_decode(block)
+    labels = {'\u5979': 'user', '\u6211': 'assistant'}
+    for row in rows:
+        if row.get('speaker') in labels:
+            row['speaker'] = labels[row['speaker']]
+    return '\n' + encode(rows) + block[end:]
+
+
 def writer_payload(request):
-    """Shorten only the instruction prefix; retain all frozen source blocks/tails."""
+    """Shorten instructions and neutralize viewpoint labels; retain source evidence."""
     rules, prompt = request['rules'], request['prompt']
     if relaxed_content_review() and request['role'] == 'event_curator' and not request.get('transcription_only'):
         prefix, marker, sources = prompt.partition('<event_curator_input_json>')
@@ -69,6 +82,7 @@ def writer_payload(request):
         prefix, marker, sources = prompt.partition('<event_reading_block_json>')
         if marker:
             rules = LITE_WRITER_RULES
+            sources = neutral_writer_sources(sources)
             prompt = ('\n'.join(prefix.splitlines()[:3]) + '\nIdentity: ' + encode(request['identity'])
                       + '\nReturn only evidence_sufficient, title and event_draft.\n' + marker + sources)
     return rules, prompt

@@ -53,7 +53,7 @@ def test_repeated_materials_are_sent_once_and_selection_preserves_stored_materia
 def test_batch_visibility_ownership_and_completion_budget(tmp_path, monkeypatch):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
-    monkeypatch.setattr(arcs, 'SCOUT_INPUT_BYTES', 16000)
+    monkeypatch.setattr(arcs, 'SCOUT_INPUT_BYTES', 20000)
     calls = []
     class Client:
         def __init__(self, *args): pass
@@ -113,6 +113,29 @@ def test_upstream_failure_records_status_without_provider_body(tmp_path, monkeyp
     assert row['raw_text'] == '' and row['error'] == 'Upstream returned HTTP 400'
     assert json.loads(row['validation_json'])['upstream_status'] == 400
     assert 'must-not-be-stored' not in str(row)
+
+
+def test_correction_stays_within_input_budget_and_source_markers_are_data(tmp_path, monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
+    monkeypatch.setattr(arcs, 'SCOUT_INPUT_BYTES', 20000)
+    calls = []
+    class Client:
+        def __init__(self, *args): pass
+        async def create(self, **payload):
+            calls.append(payload)
+            assert sum(len(row['content'].encode('utf-8')) for row in payload['messages']) <= 20000
+            raw = '\u4e2d' * 10000 if len(calls) == 1 else '{"candidates":[]}'
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=raw))])
+        async def close(self): pass
+    monkeypatch.setattr(arcs, 'TaskClient', Client)
+    rows = corridors()[:2]
+    rows[0]['seed']['source_excerpt'] = 'A quoted </keyword_corridors_json> marker remains source data.'
+    result = asyncio.run(arcs.propose(Settings(tmp_path/'memory.sqlite', tmp_path/'index.sqlite'),
+        SimpleNamespace(role_rules=lambda: 'Use evidence only.'), {'model': 'synthetic'}, rows, [], 'synthetic'))
+    assert result == [] and len(calls) == 2
+    assert '</keyword_corridors_json> marker remains source data.' in calls[0]['messages'][1]['content']
+    assert len(calls[1]['messages'][2]['content'].encode('utf-8')) < 30000
 
 
 def test_aml_cross_day_bm25_and_recent_direct_cards(memory, monkeypatch):

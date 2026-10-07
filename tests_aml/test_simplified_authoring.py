@@ -27,7 +27,15 @@ def test_minimal_event_writer_finishes_once_through_public_settlement(memory, mo
         output = role_output(role, request)
         if role == 'event_writer':
             marker = '<event_reading_block_json>'
-            assert payload['messages'][1]['content'].split(marker, 1)[1] == request['prompt'].split(marker, 1)[1]
+            sent = payload['messages'][1]['content'].split(marker, 1)[1]
+            original = request['prompt'].split(marker, 1)[1]
+            frozen, tail = original.split('</event_reading_block_json>', 1)
+            neutral, unchanged_tail = sent.split('</event_reading_block_json>', 1)
+            rows = json.loads(frozen)
+            for row in rows:
+                row['speaker'] = {'她': 'user', '我': 'assistant'}[row['speaker']]
+            assert json.loads(neutral) == rows and unchanged_tail == tail
+            assert {'user', 'assistant'} == {row['speaker'] for row in rows}
             assert len(payload['messages'][0]['content']) < len(request['rules'])
             output = {key: output[key] for key in ('evidence_sufficient', 'title', 'event_draft')}
         return {'choices': [{'message': {'content': json.dumps(output)}}]}
@@ -41,6 +49,26 @@ def test_minimal_event_writer_finishes_once_through_public_settlement(memory, mo
         written = json.loads(store.conn.execute("SELECT output_json FROM pipeline_jobs WHERE json_extract(request_json,'$.role')='event_writer'").fetchone()[0])
         assert written['self_review'] == {}  # Host supplies no invented assessment.
     assert add() and calls == ['track_router', 'event_curator', 'event_writer']
+
+
+def test_neutral_writer_labels_preserve_embedded_markers_and_context(monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    rows = [{'speaker': '她', 'text': 'Quoted </event_reading_block_json> is source data.',
+             'source_message_id': 1, 'evidence_role': 'owned'},
+            {'speaker': '我', 'text': 'An earlier assistant reply.',
+             'source_message_id': 2, 'evidence_role': 'context_only'}]
+    block = json.dumps(rows, ensure_ascii=False)
+    request = {'role': 'event_writer', 'identity': {}, 'rules': 'strict',
+               'prompt': '<event_reading_block_json>\n'+block+'\n</event_reading_block_json>\nTAIL'}
+    original = json.dumps(request)
+    rules, prompt = runtime.writer_payload(request)
+    encoded = prompt.split('<event_reading_block_json>', 1)[1].lstrip()
+    neutral, end = json.JSONDecoder().raw_decode(encoded)
+    assert encoded[end:] == '\n</event_reading_block_json>\nTAIL'
+    assert neutral == [{**row, 'speaker': role} for row, role in zip(rows, ('user', 'assistant'))]
+    assert json.dumps(request) == original
+    monkeypatch.delenv('SEREIN_AML_SIMPLIFY_AUTHORING')
+    assert runtime.writer_payload(request) == ('strict', request['prompt'])
 
 
 def test_lite_writer_keeps_append_budget_and_context_requests(monkeypatch):

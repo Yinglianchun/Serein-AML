@@ -17,6 +17,7 @@ from serein.model_runtime import TaskClient, UpstreamError
 
 
 SCOUT_INPUT_BYTES = 60000
+SCOUT_CORRECTION_RESERVE_BYTES = 2048
 SCOUT_SEED_LIMIT = 8
 SCOUT_CANDIDATES_PER_SEED = 4
 
@@ -25,12 +26,14 @@ def scout_messages(scout, corridors, rolls, *, compact=False):
     messages = build_new_roll_candidate_prompt(corridors, role_rules=scout.role_rules(),
                                                existing_candidates=[], existing_rolls=rolls)
     if compact:
-        opening, closing = '<keyword_corridors_json>', '</keyword_corridors_json>'
+        opening = '<keyword_corridors_json>'
         before, payload = messages[-1]['content'].split(opening, 1)
-        payload, after = payload.split(closing, 1)
+        payload = payload.lstrip()
+        rows, end = json.JSONDecoder().raw_decode(payload)
+        after = payload[end:]
         materials, connections = {}, []
         pair_fields = ('matched_keywords', 'matched_entities', 'candidate_sources')
-        for corridor in json.loads(payload):
+        for corridor in rows:
             def reference(item):
                 key = item['source_type'] + ':' + item['source_id']
                 materials.setdefault(key, {k: v for k, v in item.items() if k not in pair_fields})
@@ -41,7 +44,7 @@ def scout_messages(scout, corridors, rolls, *, compact=False):
                              ensure_ascii=False, separators=(',', ':'))
         messages[-1]['content'] = (before + 'Each material is listed once. Resolve material_ref through '
             'materials; return the original source_type/source_id in candidate decisions.\n' +
-            opening + catalog + closing + after)
+            opening + catalog + after)
     constraints = {'existing_narrative_ids': [row['narrative_id'] for row in rolls],
                    'existing_proposal_ids': []}
     messages[-1]['content'] += ('\nHOST_IDS: ' + encode(constraints) +
@@ -77,7 +80,7 @@ def scout_selection(scout, corridors, rolls):
                 row['candidates'].append(candidate)
             size = sum(len(message['content'].encode('utf-8'))
                        for message in scout_messages(scout, trial, rolls, compact=True))
-            if size > SCOUT_INPUT_BYTES:
+            if size > SCOUT_INPUT_BYTES - SCOUT_CORRECTION_RESERVE_BYTES:
                 continue
             current = trial
     if ranked and not current:
@@ -154,10 +157,19 @@ async def propose_batch(settings, scout, model, corridors, rolls, fingerprint):
                 return candidates
             if attempt == 2:
                 raise RuntimeError('Public Arc Scout output did not pass validation: ' + error)
-            messages = [*messages[:2], {'role': 'assistant', 'content': raw[:10000]},
-                        {'role': 'user', 'content': 'Host validation failed: ' + error +
-                         '\nReturn the complete corrected JSON. Preserve the grounded semantic decision; '
-                         'do not force a grouping. Use only the original input IDs.'}]
+            feedback = ('Host validation failed: ' + error +
+                        '\nReturn the complete corrected JSON. Preserve the grounded semantic decision; '
+                        'do not force a grouping. Use only the original input IDs.')
+            excerpt = raw[:10000]
+            if relaxed_content_review():
+                feedback = ('Host validation failed: ' + error.encode('utf-8')[:1024].decode('utf-8', errors='ignore') +
+                            '\nReturn the complete corrected JSON. Preserve the grounded semantic decision; '
+                            'do not force a grouping. Use only the original input IDs.')
+                remaining = SCOUT_INPUT_BYTES - len(feedback.encode('utf-8')) - sum(
+                    len(row['content'].encode('utf-8')) for row in messages[:2])
+                excerpt = excerpt.encode('utf-8')[:max(0, remaining)].decode('utf-8', errors='ignore')
+            messages = [*messages[:2], {'role': 'assistant', 'content': excerpt},
+                        {'role': 'user', 'content': feedback}]
     finally:
         await client.close()
 
