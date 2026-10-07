@@ -96,6 +96,24 @@ def prepare_curator_output(request, output):
     readonly = {unit['unit_root_message_id'] for unit in component['memberships']
                 if not set(unit['source_message_ids']) & stable}
     output = copy.deepcopy(output)
+    if relaxed_content_review() and isinstance(output.get('events'), list):
+        retained = []
+        for event in output['events']:
+            # A create proposal may select visible, read-only context as owned.
+            # Keep only its declared writable roots; never reassign that context
+            # to another source or modify a predecessor-based operation.
+            if (isinstance(event, dict) and set(event) == {
+                    'action', 'base_event_ids', 'primary_track_id', 'owned_unit_roots'}
+                    and event['action'] == 'create' and event['base_event_ids'] == []
+                    and event['primary_track_id'] in component.get('track_ids', [])
+                    and isinstance(event['owned_unit_roots'], list)):
+                roots = event['owned_unit_roots']
+                filtered = [root for root in roots if not (type(root) is int and root in readonly)]
+                if roots and not filtered:
+                    continue  # No writable source: do not invent an Event.
+                event['owned_unit_roots'] = filtered
+            retained.append(event)
+        output['events'] = retained
     review = output.get('decision_review')
     dispositions = review.get('dispositions') if isinstance(review, dict) else None
     def writable_roots(values):
@@ -129,6 +147,17 @@ def prepare_curator_output(request, output):
             retained.append(row)
         review['dispositions'] = retained
     return output
+
+
+def record_curator_normalization(database, job_id, original, normalized):
+    """Audit discarded declarations separately from the untouched literal reply."""
+    if not relaxed_content_review() or original == normalized:
+        return
+    with Store(database) as store:
+        store.conn.execute('CREATE TABLE IF NOT EXISTS aml_curator_normalizations ('
+                           'job_id TEXT PRIMARY KEY, decision_json TEXT NOT NULL)')
+        store.conn.execute('INSERT OR REPLACE INTO aml_curator_normalizations VALUES (?,?)',
+            (job_id, encode({'policy': 'safe_subset', 'original': original, 'normalized': normalized})))
 
 
 def prepare_router_output(request, output):
@@ -409,6 +438,7 @@ HOST_IDS:
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
             output = prepare_router_output(request, output)
+            curator_original = output
             output = prepare_curator_output(request, output)
             output = prepare_writer_output(request, output)
             try:
@@ -422,6 +452,8 @@ HOST_IDS:
                                         'curator_coverage_pending_host: ' + str(error))
                 return output
             pipeline.record_attempt(settings.database, identifier, raw)
+            if role == 'event_curator':
+                record_curator_normalization(settings.database, identifier, curator_original, output)
             return output
         except ValueError as error:
             audit_error = ('aml_stage_validation: ' if received and simplified_authoring() else '') + str(error)

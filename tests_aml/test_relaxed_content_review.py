@@ -79,7 +79,7 @@ def test_editorial_failures_do_not_buy_rewrites_or_fake_reviews(memory, monkeypa
             assert store.conn.execute('SELECT count(*) FROM raw_processing').fetchone()[0] == 0
 
 
-@pytest.mark.parametrize('error', ['foreign_root', 'read_only_owner', 'overlap'])
+@pytest.mark.parametrize('error', ['foreign_root', 'overlap'])
 def test_source_guards_still_block_settlement(memory, monkeypatch, error):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
@@ -95,7 +95,7 @@ def test_source_guards_still_block_settlement(memory, monkeypatch, error):
             if error == 'overlap':
                 output['skip_unit_roots'] = roots
             else:
-                output['events'][0]['owned_unit_roots'].append(999999 if error == 'foreign_root' else 3)
+                output['events'][0]['owned_unit_roots'].append(999999)
         return output
     monkeypatch.setattr(runtime, 'run_stage', lambda settings, role, request: runner(role, request))
     with pytest.raises(RuntimeError):

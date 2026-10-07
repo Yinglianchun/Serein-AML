@@ -127,6 +127,15 @@ This is the `lite-v3-content` authoring profile. It requires fresh empty storage
 a separately disclosed evaluation version; do not resume a v2 evaluation against
 it. Keep the old database and logs for diagnosis and rollback.
 
+In this profile, compact `create` proposals use only their declared writable roots.
+Known read-only roots are filtered without substituting any source ID. A proposal
+with no writable roots is discarded; predecessor-based operations, unknown IDs,
+foreign Tracks and duplicate writable roots retain validation. The accepted subset
+and original decision are stored in `aml_curator_normalizations`; the literal model
+reply is still archived unchanged. Unselected/skipped originals stay retrievable,
+and read-only tails stay unprocessed. This format recovery keeps the existing v3
+profile and data compatible; it does not convert an invalid proposal into a memory.
+
 Before returning a volume body, Search also checks that its current Event/Scene materials are readable and allowed for the original question. AML-authored prose must still match its committed source snapshot, selected membership, title/focus and body hash. Changed or newly linked materials suppress the old prose until it is rewritten; independently eligible individual materials remain available.
 
 `SEREIN_AML_TAG_MEMORIES=1` runs the unchanged public metadata-tagging queue synchronously after Event settlement. The `operit_tagging` model suggests a primary domain and extracts named entities from exact bound originals, or explicitly labeled body-only material when no original is bound. Invalid entity refs/quotes are filtered by the public validator; a valid empty entity list is allowed. Authored titles, bodies, domains and cues are preserved. Eligible imported Scenes use the public cue-generation rules; no Event cues or new facts are invented. Aliases remain suggestions and never merge identities.
