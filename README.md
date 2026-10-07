@@ -4,6 +4,32 @@ Serein adapted for the **Agent Memory Leaderboard (Cycle 2, Textual Memory)**.
 
 This repository imports the published Serein backend from commit `b5b13800ad086ea763afd9008ef3bdbfbb83c75b` (public release `0.1.0-rc65`) and keeps the competition changes separate and auditable.
 
+## What this leaderboard result covers
+
+AML evaluates this adapter's synchronous conversation ingestion and question-driven
+text retrieval: preserving useful facts across supplied histories and returning
+evidence for explicit questions. The score reflects the selected models, enabled
+features, returned-text budget and the benchmark's downstream answer/scoring path;
+it is not a score for every Serein capability. Smoke completion is a compatibility
+check, not proof of semantic accuracy or a completed full evaluation.
+
+| Capability | Coverage in this integration |
+| --- | --- |
+| Original archive, Track routing, Event writing, lexical/vector retrieval and reranking | Used by Add/Search; evaluated through their effect on returned evidence and answers, not independently graded |
+| Tagging, automatic Arc grouping, Narrative authoring/menu reading and bounded gap search | Used only when enabled; an aggregate score does not isolate their contribution |
+| When to surface a memory or remain silent in ordinary conversation | Not evaluated: Search explicitly uses lookup mode |
+| Repeated-delivery cooldown, normal two-card delivery limit and new-chat resume | Not exercised by this lookup adapter |
+| Human editing, protected/manual memory lifecycle and Narrative read/preview/save conflict handling | Host contracts remain enforced, but this benchmark is not a dedicated lifecycle or concurrency test |
+| Scene creation, multimodal understanding, long-running companionship and proactive behavior | Not established by textual Add/Search results |
+
+The competition uses gpt-4o-mini for generation. Its ability to follow long
+instructions, emit strict structures and distinguish activity boundaries is a
+practical limitation. The disclosed simplified profile uses short Router/Curator/
+Writer tasks and removes optional editorial reviews and citation gates. It does
+not claim to benchmark Serein's strict editorial/citation protocol. Source
+accounting, user isolation, ownership, lifecycle and save conflicts remain host
+checks; generated summaries and routing decisions can still be wrong.
+
 ## Public backend baseline
 
 The baseline imported 232 files under `src/serein/`; selected later public patches now bring the backend to 233 files. The base commit remains pinned, and every applied backend patch and its paths are recorded in [`upstream-serein.json`](upstream-serein.json). The import includes Event continuation and evidence handling, recoverable processing stages, grounded narrative candidate discovery, diary search, and separate Event/Scene domain rules.
@@ -117,6 +143,15 @@ Unverified `decision_review` is archived in the literal reply but excluded from 
 settled plan. Writer requires usable title/body and the evidence-sufficient flag;
 self-review/detail/citation scaffolding is ignored. The public default remains strict,
 and the policy is scoped to each asynchronous pipeline task.
+
+Router also receives one short task with the unchanged frozen Track cards, raw
+messages and recent-context block. It chooses one primary activity per message;
+same-Track replies have no context edge, and only an explicit connection to a
+different Track is a bridge. The model need not repeat unchanged existing cards.
+A contradictory self-context bridge still requires a corrected model decision;
+the host does not guess a replacement role or manufacture a second Track. This
+prompt simplification preserves the existing profile, saved requests and public
+validation, so paused jobs can use public retry without replacing their database.
 
 Scout uses the public normalizer's bounded safe candidate subset rather than asking
 the model to restore discarded candidates or justify them. Its audit records the

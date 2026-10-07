@@ -10,6 +10,61 @@ from serein.extensions import pipeline
 from test_engine import memory, role_output, add
 
 
+def test_lite_router_repairs_self_bridge_by_model_decision(memory, monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
+    monkeypatch.setattr(pipeline, 'advance', pipeline.advance.original)
+    calls = []
+
+    async def complete(model, payload, **kwargs):
+        with Store(engine._paths('user-a').database, read_only=True) as store:
+            request = json.loads(store.conn.execute(
+                'SELECT request_json FROM pipeline_jobs WHERE output_json IS NULL ORDER BY rowid DESC LIMIT 1').fetchone()[0])
+        role = request['role']
+        calls.append(role)
+        output = role_output(role, request)
+        if role == 'track_router':
+            rules, prompt = [row['content'] for row in payload['messages']]
+            assert rules == runtime.LITE_ROUTER_RULES and len(rules) < len(request['rules'])
+            marker = '<active_tracks_json>'
+            frozen = marker + request['prompt'].split(marker, 1)[1]
+            assert frozen in prompt
+            assert 'HOST ROUTING COVERAGE' not in prompt
+            if calls.count(role) == 1:
+                output['message_assignments'][0].update(
+                    routing_role='bridge', context_track_refs=['new:1'])
+            else:
+                assert 'A same-Track reply is not a bridge' in prompt
+                assert 'choose its non-bridge role' in prompt
+        return {'choices': [{'message': {'content': json.dumps(output)}}]}
+
+    monkeypatch.setattr('serein.model_runtime.complete', complete)
+    receipt = add()
+    assert calls == ['track_router', 'track_router', 'event_curator', 'event_writer']
+    assert add() == receipt
+    with Store(engine._paths('user-a').database, read_only=True) as store:
+        attempts = store.conn.execute("SELECT output_text,error FROM pipeline_attempts WHERE output_text!='' ORDER BY rowid").fetchall()
+        assert json.loads(attempts[0][0])['message_assignments'][0]['routing_role'] == 'bridge'
+        assert 'bridge role must match' in attempts[0][1]
+        assert attempts[1][1] == ''
+        assert store.conn.execute('SELECT count(*) FROM raw_processing').fetchone()[0] == 2
+
+
+def test_lite_router_preserves_frozen_packet_and_defaults_off(monkeypatch):
+    task = {'role': 'track_router', 'rules': 'original rules', 'messages': [{'id': 1}],
+            'prompt': 'Date\nRange\nLong instructions\n<active_tracks_json>\n[]\n</active_tracks_json>\n'
+                      '<raw_messages_json>[{"text":"<active_tracks_json> is quoted data"}]</raw_messages_json>\nTAIL'}
+    original = copy.deepcopy(task)
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    monkeypatch.delenv('SEREIN_AML_RELAX_CONTENT_REVIEW', raising=False)
+    assert runtime.writer_payload(task) == (task['rules'], task['prompt'])
+    monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
+    rules, prompt = runtime.writer_payload(task)
+    assert rules == runtime.LITE_ROUTER_RULES
+    assert prompt.split('<active_tracks_json>', 1)[1] == task['prompt'].split('<active_tracks_json>', 1)[1]
+    assert task == original
+
+
 @pytest.mark.parametrize('kind', ['self', 'unknown', 'bridge', 'empty'])
 def test_router_self_context_is_redundant_not_a_new_relation(memory, monkeypatch, kind):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
