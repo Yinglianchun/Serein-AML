@@ -59,6 +59,23 @@ def neutral_writer_sources(sources):
     return '\n' + encode(rows) + block[end:]
 
 
+def curator_event_scope(component):
+    """Expose frozen writable Track IDs separately from visible bridge Tracks."""
+    allowed = list(component.get('track_ids') or [])
+    stable = {message['id'] for message in component.get('messages') or []}
+    edge_tracks = {}
+    for edge in component.get('context_edges') or []:
+        edge_tracks.setdefault(edge['unit_root_message_id'], []).append(edge['track_id'])
+    external = []
+    for unit in component.get('memberships') or []:
+        if (unit.get('track_id') not in allowed
+                and set(unit.get('source_message_ids') or [unit['unit_root_message_id']]) & stable):
+            root = unit['unit_root_message_id']
+            external.append({'root': root, 'primary_track_id': unit.get('track_id'),
+                             'context_track_ids': edge_tracks.get(root, [])})
+    return {'allowed_primary_track_ids': allowed, 'stable_units_on_other_tracks': external}
+
+
 def writer_payload(request):
     """Shorten instructions and neutralize viewpoint labels; retain source evidence."""
     rules, prompt = request['rules'], request['prompt']
@@ -72,12 +89,20 @@ def writer_payload(request):
             prompt = ('\n'.join(prefix.splitlines()[:2]) + '\nReturn JSON: '
                       '{"events":[{"action":"create","base_event_ids":[],"primary_track_id":"actual track ID",'
                       '"owned_unit_roots":[1]}],"skip_unit_roots":[],"defer_unit_roots":[]}. '
+                      'Every Event primary_track_id MUST be in allowed_primary_track_ids below. '
+                      'Visible unit primary_track/context_tracks and Track cards do not enlarge that list. '
+                      'A stable unit on another Track may supply declared bridge evidence to an allowed Event '
+                      'when it supports that activity. Otherwise explicitly skip or defer it in this component; '
+                      'do not create a separate Event for its external Track. That Track is handled separately. '
+                      'Skipping here does not remove the archived original or settle another component. '
                       'Each stable root must be owned, skipped or deferred. Only declared bridges may be shared. '
                       'Parked/context roots are read-only. create has no base; extend/rewrite has one supplied base; '
                       'merge has at least two. Keep important old facts when extending or rewriting. '
                       'For essential missing context, use only the original bounded context_request schema: '
                       '{"context_request":{"track_id":"allowed track ID","before_message_id":1,'
-                      '"reason":"missing_subject|missing_origin|missing_prior_claim"}}.\n' + marker + sources)
+                      '"reason":"missing_subject|missing_origin|missing_prior_claim"}}.\n'
+                      'Host Event scope: ' + encode(curator_event_scope(request['component']))
+                      + '\n' + marker + sources)
     if simplified_authoring() and request['role'] == 'event_writer' and not request.get('transcription_only'):
         prefix, marker, sources = prompt.partition('<event_reading_block_json>')
         if marker:
