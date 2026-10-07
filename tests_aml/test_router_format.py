@@ -1,4 +1,5 @@
-"""Self-context normalization and durable paid validation retry limits."""
+"""Declared route representation repairs and durable paid validation retry limits."""
+import copy
 import json
 
 import pytest
@@ -131,7 +132,8 @@ def test_bridge_tolerance_still_rejects_invalid_routes_and_new_card_omissions(mo
                                                      session_id='test', next_track_ordinal=1)
 
 
-def test_existing_primary_card_omission_runs_real_pipeline_once(memory, monkeypatch):
+@pytest.mark.parametrize('padding', [False, True])
+def test_existing_primary_card_omission_runs_real_pipeline_once(memory, monkeypatch, padding):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     add()  # Freeze a real existing card in this synthetic user's database.
     monkeypatch.setattr(pipeline, 'advance', pipeline.advance.original)
@@ -148,8 +150,12 @@ def test_existing_primary_card_omission_runs_real_pipeline_once(memory, monkeypa
         output = role_output(role, request)
         if role == 'track_router':
             card = request['active_tracks'][0]
+            assert card['track_id'] in payload['messages'][1]['content']
+            assert 'copy each ID exactly, including zero padding' in payload['messages'][1]['content']
+            prefix, ordinal = card['track_id'].rsplit('_', 1)
+            ref = prefix + '_' + ordinal.lstrip('0') if padding else card['track_id']
             for row in output['message_assignments']:
-                row['primary_track_ref'] = card['track_id']
+                row['primary_track_ref'] = ref
             output['track_updates'] = []
         elif role == 'event_curator':
             stable = {row['id'] for row in request['component']['messages']}
@@ -169,6 +175,104 @@ def test_existing_primary_card_omission_runs_real_pipeline_once(memory, monkeypa
         assert store.conn.execute('SELECT count(*) FROM raw_processing').fetchone()[0] == 4
         assert store.conn.execute('SELECT count(*) FROM pipeline_tracks').fetchone()[0] == 1
         assert store.conn.execute("SELECT count(*) FROM aml_add_receipts WHERE status='complete'").fetchone()[0] == 2
+        audit = json.loads(store.conn.execute('SELECT decision_json FROM aml_router_normalizations ORDER BY rowid DESC LIMIT 1').fetchone()[0])
+        assert audit['policy'] == 'declared_route_format'
+        assert audit['original']['track_updates'] == []
+        assert len(audit['normalized']['track_updates']) == 1
+        stored_id = store.conn.execute('SELECT id FROM pipeline_tracks').fetchone()[0]
+        assert audit['normalized']['message_assignments'][0]['primary_track_ref'] == stored_id
+        if padding:
+            assert audit['original']['message_assignments'][0]['primary_track_ref'] != stored_id
+        literal = json.loads(store.conn.execute("SELECT a.output_text FROM pipeline_attempts a JOIN aml_router_normalizations n ON n.job_id=a.job_id WHERE a.output_text!='' AND a.error='' ORDER BY a.rowid DESC LIMIT 1").fetchone()[0])
+        assert literal == audit['original']
+
+
+def numbered_router_task():
+    task = frozen_router_task()
+    task['active_tracks'][0]['track_id'] = 'session_abc123_track_0002'
+    return task
+
+
+@pytest.mark.parametrize('suffix', ['2', '02', '002', '000002'])
+@pytest.mark.parametrize('field', ['primary', 'context', 'update'])
+def test_only_zero_padding_changes_resolve_to_a_frozen_exact_id(monkeypatch, suffix, field):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    task, output = numbered_router_task(), bridge_output('landing')
+    exact = task['active_tracks'][0]['track_id']
+    malformed = 'session_abc123_track_' + suffix
+    for row in output['message_assignments']:
+        row['context_track_refs'] = [malformed if field == 'context' else exact]
+        if field == 'primary':
+            row.update(primary_track_ref=malformed, context_track_refs=[], routing_role='primary_activity')
+    if field == 'primary':
+        output['track_updates'] = []
+    elif field == 'update':
+        output['track_updates'].append({**task['active_tracks'][0], 'track_ref': malformed})
+        output['track_updates'][-1].pop('track_id')
+    literal = copy.deepcopy(output)
+    normalized = runtime.prepare_router_output(task, output)
+    assignments, updates, _ = pipeline.normalize_event_track_message_output(
+        normalized, task['messages'], task['active_tracks'], session_id='test', next_track_ordinal=1)
+    assert output == literal
+    assert [row['source_message_id'] for row in assignments] == [1, 2]
+    assert next(row for row in updates if row['track_id'] == exact) == task['active_tracks'][0]
+    assert all((row['primary_track_id'] == exact if field == 'primary' else row['context_track_ids'] == [exact])
+               for row in assignments)
+    monkeypatch.delenv('SEREIN_AML_SIMPLIFY_AUTHORING')
+    assert runtime.prepare_router_output(task, output) is output
+    with pytest.raises(ValueError):
+        pipeline.normalize_event_track_message_output(output, task['messages'], task['active_tracks'],
+                                                     session_id='test', next_track_ordinal=1)
+
+
+@pytest.mark.parametrize('ref', ['session_other_track_002', 'session_abc123_track_003',
+                               'session_abc123_track_000', 'abc123_track_002',
+                               'session_abc123_track_2x', 'the garden pump'])
+def test_unknown_and_non_number_track_refs_are_not_guessed(monkeypatch, ref):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    task, output = numbered_router_task(), bridge_output('landing')
+    for row in output['message_assignments']:
+        row['context_track_refs'] = [ref]
+    normalized = runtime.prepare_router_output(task, output)
+    assert normalized['message_assignments'][0]['context_track_refs'] == [ref]
+    with pytest.raises(ValueError):
+        pipeline.normalize_event_track_message_output(normalized, task['messages'], task['active_tracks'],
+                                                     session_id='test', next_track_ordinal=1)
+
+
+@pytest.mark.parametrize('invalid', ['ambiguous', 'duplicate_context', 'duplicate_update', 'missing_source'])
+def test_number_format_recovery_does_not_hide_route_errors(monkeypatch, invalid):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    task, output = numbered_router_task(), bridge_output('landing')
+    exact = task['active_tracks'][0]['track_id']
+    malformed = 'session_abc123_track_002'
+    for row in output['message_assignments']:
+        row['context_track_refs'] = [malformed]
+    if invalid == 'ambiguous':
+        task['active_tracks'].append({**task['active_tracks'][0], 'track_id': 'session_abc123_track_02'})
+    elif invalid == 'duplicate_context':
+        output['message_assignments'][0]['context_track_refs'].append(exact)
+    elif invalid == 'duplicate_update':
+        update = {key: value for key, value in task['active_tracks'][0].items() if key != 'track_id'}
+        output['track_updates'].extend([{**update, 'track_ref': ref} for ref in (malformed, exact)])
+    else:
+        output['message_assignments'].pop()
+    normalized = runtime.prepare_router_output(task, output)
+    with pytest.raises(ValueError):
+        pipeline.normalize_event_track_message_output(normalized, task['messages'], task['active_tracks'],
+                                                     session_id='test', next_track_ordinal=1)
+
+
+def test_exact_ids_win_over_ambiguous_numeric_aliases(monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    task, output = numbered_router_task(), bridge_output('bridge')
+    task['active_tracks'].append({**task['active_tracks'][0], 'track_id': 'session_abc123_track_02'})
+    for row in output['message_assignments']:
+        row['context_track_refs'] = ['session_abc123_track_02']
+    normalized = runtime.prepare_router_output(task, output)
+    assignments, _, _ = pipeline.normalize_event_track_message_output(
+        normalized, task['messages'], task['active_tracks'], session_id='test', next_track_ordinal=1)
+    assert all(row['context_track_ids'] == ['session_abc123_track_02'] for row in assignments)
 
 
 def test_explicit_card_update_wins_and_default_policy_does_not_carry_cards(monkeypatch):

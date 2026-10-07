@@ -74,6 +74,11 @@ the redundant `bridge` role marker; the adapter preserves primary/context refere
 and never inserts a cross-Track link. If a used existing Track has no update row,
 the adapter carries its frozen subject, throughline, policy and status unchanged.
 Explicit model updates win, and a new Track still needs a model-authored card.
+For generated `session_*_track_NNNN` IDs, zero-padding differences are resolved
+only to a unique canonical ID in the frozen available cards with the same session
+and numeric ordinal. Exact IDs win; ambiguous, foreign-session and unknown IDs
+remain invalid. Literal replies stay in the stage journal, and accepted Router
+format changes are recorded separately in `aml_router_normalizations`.
 Foreign Tracks, duplicate references, unsupported roles and a `bridge` with no
 distinct context still fail public validation. Curator has a format adapter: explicit disposition objects misplaced
 in integer root lists move to their review rows. Redundant skip/defer declarations

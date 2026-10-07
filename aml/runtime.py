@@ -212,7 +212,30 @@ def prepare_router_output(request, output):
     output = copy.deepcopy(output)
     cards = {card['track_id']: card for card in request.get('active_tracks', [])
              if isinstance(card, dict) and isinstance(card.get('track_id'), str)}
+    def track_number(ref):
+        match = re.fullmatch(r'(session_[A-Za-z0-9]+_track_)([0-9]+)', ref)
+        if match and (ordinal := match[2].lstrip('0')):
+            return match[1], ordinal
+        return None
+    numbers = {}
+    for ref in cards:
+        if (number := track_number(ref)) is not None:
+            numbers.setdefault(number, []).append(ref)
+    def exact_ref(ref):
+        if not isinstance(ref, str) or ref in cards:
+            return ref
+        number = track_number(ref)
+        candidates = numbers.get(number, [])
+        # Resolve only missing/extra zero padding against this frozen packet.
+        # Never resolve another session, an unknown ordinal, or ambiguous IDs.
+        if number and len(candidates) == 1 and candidates[0] == number[0] + number[1].zfill(4):
+            return candidates[0]
+        return ref
     updates = output.get('track_updates')
+    if isinstance(updates, list):
+        for row in updates:
+            if isinstance(row, dict) and 'track_ref' in row:
+                row['track_ref'] = exact_ref(row['track_ref'])
     updated = {row['track_ref'] for row in updates
                if isinstance(row, dict) and isinstance(row.get('track_ref'), str)} if isinstance(updates, list) else set()
     declared = set(cards) | {ref for ref in updated if re.fullmatch(r'new:[1-9][0-9]*', ref)}
@@ -220,8 +243,9 @@ def prepare_router_output(request, output):
     for row in output['message_assignments']:
         if (isinstance(row, dict) and isinstance(row.get('primary_track_ref'), str)
                 and isinstance(row.get('context_track_refs'), list)):
-            row['context_track_refs'] = [ref for ref in row['context_track_refs']
-                                        if ref != row['primary_track_ref']]
+            row['primary_track_ref'] = exact_ref(row['primary_track_ref'])
+            row['context_track_refs'] = [exact_ref(ref) for ref in row['context_track_refs']]
+            row['context_track_refs'] = [ref for ref in row['context_track_refs'] if ref != row['primary_track_ref']]
             refs = row['context_track_refs']
             if (row['primary_track_ref'] in declared and refs
                     and all(isinstance(ref, str) and ref in declared for ref in refs)
@@ -240,6 +264,17 @@ def prepare_router_output(request, output):
                 ('subject', 'throughline', 'event_policy', 'status') if key in card}})
             updated.add(ref)
     return output
+
+
+def record_router_normalization(database, job_id, original, normalized):
+    """Keep accepted route-format repairs apart from the archived literal reply."""
+    if not simplified_authoring() or original == normalized:
+        return
+    with Store(database) as store:
+        store.conn.execute('CREATE TABLE IF NOT EXISTS aml_router_normalizations ('
+                           'job_id TEXT PRIMARY KEY, decision_json TEXT NOT NULL)')
+        store.conn.execute('INSERT OR REPLACE INTO aml_router_normalizations VALUES (?,?)',
+            (job_id, encode({'policy': 'declared_route_format', 'original': original, 'normalized': normalized})))
 
 
 CURATOR_FORMAT = """\nJSON structure reminder (no change to the role or evidence rules):
@@ -462,7 +497,10 @@ order; never combine a user message and its reply into one assignment. Determine
 each Track and routing_role from the original dialogue under the role rules.
 The complete required source_message_id sequence is:
 """ + encode([message['id'] for message in request['messages']])
+        reminder += '\nAllowed existing Track references (copy each ID exactly, including zero padding):\n' + encode(
+            [card['track_id'] for card in request.get('active_tracks', [])])
         reminder += """
+Do not construct or abbreviate existing Track IDs. A new Track uses new:N only.
 context_track_refs must exclude that row's primary_track_ref. If no DIFFERENT
 Track supplies context, use []. A bridge still needs a genuinely different
 valid context Track; never invent one or downgrade its role to repair the schema.
@@ -519,6 +557,7 @@ HOST_IDS:
             received = True
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
+            router_original = output
             output = prepare_router_output(request, output)
             curator_original = output
             output = prepare_curator_output(request, output)
@@ -534,6 +573,8 @@ HOST_IDS:
                                         'curator_coverage_pending_host: ' + str(error))
                 return output
             pipeline.record_attempt(settings.database, identifier, raw)
+            if role == 'track_router':
+                record_router_normalization(settings.database, identifier, router_original, output)
             if role == 'event_curator':
                 record_curator_normalization(settings.database, identifier, curator_original, output)
             return output
