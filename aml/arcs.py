@@ -16,7 +16,7 @@ from serein.model_runtime import TaskClient
 
 
 async def propose(settings, scout, model, corridors, rolls, fingerprint):
-    from .runtime import stage_json
+    from .runtime import stage_json, relaxed_content_review
     messages = build_new_roll_candidate_prompt(corridors, role_rules=scout.role_rules(),
                                                existing_candidates=[], existing_rolls=rolls)
     constraints = {'existing_narrative_ids': [row['narrative_id'] for row in rolls],
@@ -30,6 +30,8 @@ async def propose(settings, scout, model, corridors, rolls, fingerprint):
     with Store(settings.database) as store:
         store.conn.execute('CREATE TABLE IF NOT EXISTS aml_scout_attempts ('
             'id INTEGER PRIMARY KEY, input_sha256 TEXT, attempt INTEGER, raw_text TEXT, error TEXT)')
+        if 'validation_json' not in {row['name'] for row in store.conn.execute('PRAGMA table_info(aml_scout_attempts)')}:
+            store.conn.execute('ALTER TABLE aml_scout_attempts ADD COLUMN validation_json TEXT')
     client = TaskClient(settings.database, 'narrative_scout')
     try:
         for attempt in range(3):
@@ -37,17 +39,24 @@ async def propose(settings, scout, model, corridors, rolls, fingerprint):
                                             response_format={'type': 'json_object'}, temperature=0, store=False)
             raw = response.choices[0].message.content if response.choices else ''
             error = ''
+            validation = None
             try:
                 output = stage_json(raw, 'narrative_scout')
                 candidates = normalize_new_roll_candidates(output, corridors, [], rolls)
                 proposed = output['candidates']
-                if len(proposed) > 24 or len(candidates) != len(proposed):
+                if relaxed_content_review():
+                    # Public normalization already bounds material references and
+                    # filters unusable candidates. Keep that safe subset without
+                    # buying another reply to justify or restore rejected rows.
+                    validation = {'policy': 'safe_subset', 'proposed': len(proposed),
+                                  'accepted': len(candidates), 'candidates': candidates}
+                elif len(proposed) > 24 or len(candidates) != len(proposed):
                     raise ValueError('Arc candidate has an invalid ID, incomplete materials, conflicting '
                                      'ownership, missing reason/title, or unsupported confidence. '
                                      'Use the supplied IDs and include the seed in materials.')
                 # The public normalizer can discard unknown extra material refs.
                 # Ask the model to correct these rather than silently hiding them.
-                for item, normalized in zip(proposed, candidates):
+                for item, normalized in ([] if relaxed_content_review() else zip(proposed, candidates)):
                     requested = {(str(row.get('source_type') or '').strip().lower(), str(row.get('source_id') or '').strip())
                                  for row in item.get('materials') or [] if isinstance(row, dict)}
                     accepted = {(kind, str(key)) for kind in ('event', 'scene', 'diary')
@@ -57,8 +66,8 @@ async def propose(settings, scout, model, corridors, rolls, fingerprint):
             except (ValueError, KeyError, TypeError) as rejected:
                 error = str(rejected)
             with Store(settings.database) as store:
-                store.conn.execute('INSERT INTO aml_scout_attempts(input_sha256,attempt,raw_text,error) '
-                                   'VALUES (?,?,?,?)', (fingerprint, attempt, raw, error))
+                store.conn.execute('INSERT INTO aml_scout_attempts(input_sha256,attempt,raw_text,error,validation_json) '
+                                   'VALUES (?,?,?,?,?)', (fingerprint, attempt, raw, error, encode(validation)))
             if not error:
                 return candidates
             if attempt == 2:

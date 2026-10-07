@@ -6,6 +6,9 @@
   "backend_prefix": "src/serein/",
   "backend_file_count": 233,
   "local_overrides": {
+    "src/serein/extensions/pipeline_policy.py": "Task-local editorial review opt-out; defaults strict and does not change source ownership or storage validation",
+    "src/serein/extensions/pipeline_latest.py": "Opt-in AML content policy bypasses Curator editorial receipts/activity gates and Writer review scaffolding while preserving structural ownership and usable-body checks",
+    "src/serein/extensions/pipeline_admission.py": "Respect task-local editorial review opt-out without applying the optional Writer round gate",
     "src/serein/adapters/embedding.py": "Split text-embedding-v4 document and query transport into at most ten inputs per request, preserving all inputs, query/document instructions and per-request response-position validation; other models retain their existing behavior",
     "pyproject.toml": "pytest includes tests and tests_aml, with src and the repository root on pythonpath",
     "tests/test_transcription_first.py": "align append-only writer assertions with new-source scope while retaining cached transcription reuse checks",

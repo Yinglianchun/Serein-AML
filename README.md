@@ -103,6 +103,30 @@ available through the menu. The option defaults off and is part of the database
 profile: use a fresh empty data directory and a separately disclosed version when
 enabling it. Do not switch it during an evaluation. Raw model replies remain audited.
 
+`SEREIN_AML_RELAX_CONTENT_REVIEW=1` additionally opts out of editorial acceptance
+gates when simplified authoring is enabled. Curator gets a shorter compact task
+with the exact frozen source input; activity classification, boundary/disposition
+reasons and quotes, bridge/continuation reviews, material-use audits, round admission,
+and the one-Event editorial limit for rolling Tracks no longer trigger rewrites.
+Unverified `decision_review` is archived in the literal reply but excluded from the
+settled plan. Writer requires usable title/body and the evidence-sufficient flag;
+self-review/detail/citation scaffolding is ignored. The public default remains strict,
+and the policy is scoped to each asynchronous pipeline task.
+
+Scout uses the public normalizer's bounded safe candidate subset rather than asking
+the model to restore discarded candidates or justify them. Its audit records the
+proposed count and accepted candidates. Invalid source/target references are still
+filtered, never invented or bound. JSON/usable-content errors and provider failures
+can still fail a write; this option does not promise that every model output can save.
+Atomic ownership, complete source accounting, read-only context boundaries, user
+isolation, predecessor/lifecycle checks, append limits, idempotency, actual indexing,
+and Narrative read/preview/save remain enforced. Original sources stay available;
+generated summaries have no additional semantic accuracy guarantee.
+
+This is the `lite-v3-content` authoring profile. It requires fresh empty storage and
+a separately disclosed evaluation version; do not resume a v2 evaluation against
+it. Keep the old database and logs for diagnosis and rollback.
+
 Before returning a volume body, Search also checks that its current Event/Scene materials are readable and allowed for the original question. AML-authored prose must still match its committed source snapshot, selected membership, title/focus and body hash. Changed or newly linked materials suppress the old prose until it is rewritten; independently eligible individual materials remain available.
 
 `SEREIN_AML_TAG_MEMORIES=1` runs the unchanged public metadata-tagging queue synchronously after Event settlement. The `operit_tagging` model suggests a primary domain and extracts named entities from exact bound originals, or explicitly labeled body-only material when no original is bound. Invalid entity refs/quotes are filtered by the public validator; a valid empty entity list is allowed. Authored titles, bodies, domains and cues are preserved. Eligible imported Scenes use the public cue-generation rules; no Event cues or new facts are invented. Aliases remain suggestions and never merge identities.
