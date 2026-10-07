@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 
 from serein.compat.scout import Scout
 from serein.compat.germany.narrative_revision_scout import (
@@ -12,21 +13,91 @@ from serein.compat.germany.narrative_scan import _bool_value
 from serein.compat.narrative_candidates import add_current_entities, index_revision, supplement_candidates, VERSION
 from serein.core.store import Store, encode
 from serein.deployment import task_model
-from serein.model_runtime import TaskClient
+from serein.model_runtime import TaskClient, UpstreamError
 
 
-async def propose(settings, scout, model, corridors, rolls, fingerprint):
-    from .runtime import stage_json, relaxed_content_review
+SCOUT_INPUT_BYTES = 60000
+SCOUT_SEED_LIMIT = 8
+SCOUT_CANDIDATES_PER_SEED = 4
+
+
+def scout_messages(scout, corridors, rolls, *, compact=False):
     messages = build_new_roll_candidate_prompt(corridors, role_rules=scout.role_rules(),
                                                existing_candidates=[], existing_rolls=rolls)
+    if compact:
+        opening, closing = '<keyword_corridors_json>', '</keyword_corridors_json>'
+        before, payload = messages[-1]['content'].split(opening, 1)
+        payload, after = payload.split(closing, 1)
+        materials, connections = {}, []
+        pair_fields = ('matched_keywords', 'matched_entities', 'candidate_sources')
+        for corridor in json.loads(payload):
+            def reference(item):
+                key = item['source_type'] + ':' + item['source_id']
+                materials.setdefault(key, {k: v for k, v in item.items() if k not in pair_fields})
+                return {'material_ref': key, **{k: item[k] for k in pair_fields if item.get(k)}}
+            connections.append({'seed': reference(corridor['seed']), 'keywords': corridor['keywords'],
+                'one_hop_candidates': [reference(item) for item in corridor['one_hop_candidates']]})
+        catalog = json.dumps({'materials': materials, 'corridors': connections},
+                             ensure_ascii=False, separators=(',', ':'))
+        messages[-1]['content'] = (before + 'Each material is listed once. Resolve material_ref through '
+            'materials; return the original source_type/source_id in candidate decisions.\n' +
+            opening + catalog + closing + after)
     constraints = {'existing_narrative_ids': [row['narrative_id'] for row in rolls],
                    'existing_proposal_ids': []}
-    reminder = ('\nHOST_IDS: ' + encode(constraints) +
+    messages[-1]['content'] += ('\nHOST_IDS: ' + encode(constraints) +
         '\nUse only the material IDs provided above. New Arcs have empty target_narrative_id '
         'and existing_proposal_id, and materials must include the seed plus at least one other '
         'provided material. An existing target must be in HOST_IDS. Do not invent IDs. '
         'You may return candidates=[]; the host does not require a grouping decision.')
-    messages[-1]['content'] += reminder
+    return messages
+
+
+def scout_selection(scout, corridors, rolls):
+    """Choose a bounded packet; unselected canonical materials stay searchable."""
+    def rank(candidate):
+        return sum(1 / (60 + value) for value in candidate.get('candidate_ranks', {}).values()
+                   if type(value) is int and value > 0)
+    ranked = [{**row, 'candidates': sorted(row.get('candidates', []), key=rank, reverse=True)
+               [:SCOUT_CANDIDATES_PER_SEED]} for row in corridors[:SCOUT_SEED_LIMIT]]
+    current = []
+    # Give recent seeds their strongest connection before adding weaker pairs.
+    for position in range(SCOUT_CANDIDATES_PER_SEED):
+        for corridor in ranked:
+            candidates = corridor['candidates'] or [None]
+            if position >= len(candidates):
+                continue
+            candidate = candidates[position]
+            trial = [{**row, 'candidates': list(row['candidates'])} for row in current]
+            row = next((row for row in trial if row['seed']['source_type'] == corridor['seed']['source_type']
+                        and row['seed']['source_id'] == corridor['seed']['source_id']), None)
+            if row is None:
+                row = {**corridor, 'candidates': []}
+                trial.append(row)
+            if candidate is not None:
+                row['candidates'].append(candidate)
+            size = sum(len(message['content'].encode('utf-8'))
+                       for message in scout_messages(scout, trial, rolls, compact=True))
+            if size > SCOUT_INPUT_BYTES:
+                continue
+            current = trial
+    if ranked and not current:
+        raise RuntimeError('Scout material pair exceeds bounded input budget')
+    return current
+
+
+async def propose(settings, scout, model, corridors, rolls, fingerprint):
+    from .runtime import relaxed_content_review
+    if not relaxed_content_review():
+        return await propose_batch(settings, scout, model, corridors, rolls, fingerprint)
+    selected = scout_selection(scout, corridors, rolls)
+    if not selected:
+        return []
+    return await propose_batch(settings, scout, model, selected, rolls, fingerprint)
+
+
+async def propose_batch(settings, scout, model, corridors, rolls, fingerprint):
+    from .runtime import stage_json, relaxed_content_review
+    messages = scout_messages(scout, corridors, rolls, compact=relaxed_content_review())
     with Store(settings.database) as store:
         store.conn.execute('CREATE TABLE IF NOT EXISTS aml_scout_attempts ('
             'id INTEGER PRIMARY KEY, input_sha256 TEXT, attempt INTEGER, raw_text TEXT, error TEXT)')
@@ -35,8 +106,19 @@ async def propose(settings, scout, model, corridors, rolls, fingerprint):
     client = TaskClient(settings.database, 'narrative_scout')
     try:
         for attempt in range(3):
-            response = await client.create(model=model['model'], messages=messages,
-                                            response_format={'type': 'json_object'}, temperature=0, store=False)
+            try:
+                response = await client.create(model=model['model'], messages=messages,
+                                                response_format={'type': 'json_object'}, temperature=0, store=False,
+                                                **({'max_tokens': 4096} if relaxed_content_review() else {}))
+            except UpstreamError as error:
+                # Do not archive provider bodies, which may contain credentials
+                # or echoed evidence. Keep the status and local input size only.
+                with Store(settings.database) as store:
+                    store.conn.execute('INSERT INTO aml_scout_attempts(input_sha256,attempt,raw_text,error,validation_json) '
+                        'VALUES (?,?,?,?,?)', (fingerprint, attempt, '', str(error), encode({
+                            'input_bytes': sum(len(row['content'].encode('utf-8')) for row in messages),
+                            'upstream_status': error.response.status_code})))
+                raise
             raw = response.choices[0].message.content if response.choices else ''
             error = ''
             validation = None

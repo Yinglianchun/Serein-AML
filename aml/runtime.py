@@ -279,6 +279,12 @@ def configuration():
                       "models": [{k: v for k, v in m.items() if k != "api_key"} for m in changes["models"]]}
     if simplified_authoring():
         public_profile['authoring_policy'] = 'lite-v3-content' if relaxed_content_review() else 'lite-v2-prose'
+    if os.getenv('SEREIN_AML_TRACK_CANDIDATES', '0') == '1':
+        selection = {'track_candidates_enabled': True,
+                     'track_direct_hours': int(os.getenv('SEREIN_AML_TRACK_DIRECT_HOURS', '12')),
+                     'track_candidate_limit': int(os.getenv('SEREIN_AML_TRACK_CANDIDATE_LIMIT', '8'))}
+        changes['pipeline'].update(selection)
+        public_profile['track_candidates'] = selection
     signature = hashlib.sha256(encode(public_profile).encode()).hexdigest()
     return changes, {"profile": profile, "signature": signature}
 
@@ -291,6 +297,9 @@ def check_profile(database):
         if json.loads(row[0]) != expected:
             raise ProfileConflict("Use a fresh SEREIN_AML_DATA_DIR when changing model profiles")
         current = read_settings(database)
+        for name, value in changes['pipeline'].items():
+            if name.startswith('track_') and current['pipeline'].get(name) != value:
+                raise ProfileConflict('Database Track selection no longer matches the AML profile')
         catalog = {model['id']: model for model in configured_models(current)}
         selected = {model['id']: model for model in changes['models']}
         for role in (*GENERATIVE_ROLES, 'embedding', 'reranker'):
