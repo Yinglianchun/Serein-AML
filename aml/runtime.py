@@ -10,6 +10,7 @@ import json
 import os
 import re
 import httpx
+from datetime import datetime, timezone
 
 from serein.config import Settings
 from serein.configured_models import effective_settings, memory_ready, prepare_selected
@@ -381,6 +382,30 @@ def prepare_memory(settings):
     return effective_settings(settings)
 
 
+def only_protected_tails_pending(database, result):
+    """A valid protected deferral stays searchable, without an immediate reround."""
+    held = {source_id for entry in result.get('protected_deferrals') or []
+            for source_id in entry.get('defer_source_message_ids') or []}
+    if not held:
+        return False
+    with Store(database, read_only=True) as store:
+        if store.conn.execute("SELECT 1 FROM pipeline_batches WHERE status IN "
+                              "('pending','needs_repair','paused_failure') LIMIT 1").fetchone():
+            return False
+        rows = list(store.conn.execute('SELECT r.* FROM raw_events r WHERE NOT EXISTS '
+                                       '(SELECT 1 FROM raw_processing p WHERE p.raw_id=r.id) ORDER BY r.id'))
+    if not held.intersection(row['id'] for row in rows):
+        return False
+    groups = {}
+    clock = datetime.now(timezone.utc)
+    for row in rows:
+        if row['id'] in held or datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')) > clock:
+            continue
+        groups.setdefault((row['source'], row['session_id']), []).append(pipeline.task_message(row))
+    return not any(pipeline.dialogue_unit_is_complete(unit)
+                   for messages in groups.values() for unit in pipeline.dialogue_units(messages))
+
+
 async def ingest_pipeline(settings):
     results = []
     seen = set()
@@ -411,6 +436,11 @@ async def ingest_pipeline(settings):
         if result["batch_id"] in seen:
             return results
         seen.add(result["batch_id"])
+        if relaxed_content_review() and only_protected_tails_pending(settings.database, result):
+            # The host accepted this batch while preserving a protected old
+            # Event. Do not immediately shrink its route frame around a held
+            # source; Add still indexes all originals before completing.
+            return results
         if not result["processed_originals"] and not result.get("curator_omission_deferrals"):
             return results
     raise RuntimeError("Public Event pipeline batch limit reached; retry this Add")
