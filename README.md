@@ -69,8 +69,13 @@ append budgets and existing bodies still pass the public pipeline checks. Option
 model claim/sentence receipts are discarded before settlement rather than triggering
 rewrites; the literal model reply remains audited. Tagging and Search are unchanged.
 Router removes a redundant context reference equal to that message's own primary
-Track. Foreign Tracks, duplicate other references and invalid bridge roles still
-fail public validation. Curator has a format adapter: explicit disposition objects misplaced
+Track. A nonempty, unique list of already-declared valid context Tracks determines
+the redundant `bridge` role marker; the adapter preserves primary/context references
+and never inserts a cross-Track link. If a used existing Track has no update row,
+the adapter carries its frozen subject, throughline, policy and status unchanged.
+Explicit model updates win, and a new Track still needs a model-authored card.
+Foreign Tracks, duplicate references, unsupported roles and a `bridge` with no
+distinct context still fail public validation. Curator has a format adapter: explicit disposition objects misplaced
 in integer root lists move to their review rows. Redundant skip/defer declarations
 for known read-only context units are removed from both lists and review rows;
 their original messages remain unprocessed and searchable. Stable-unit decisions,

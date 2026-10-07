@@ -111,16 +111,40 @@ def prepare_curator_output(request, output):
 
 
 def prepare_router_output(request, output):
-    """A primary Track is already routed; a self-context ref adds no relation."""
+    """Canonicalize declared routes and carry omitted frozen cards, never new links."""
     if (not simplified_authoring() or request['role'] != 'track_router'
             or not isinstance(output, dict) or not isinstance(output.get('message_assignments'), list)):
         return output
     output = copy.deepcopy(output)
+    cards = {card['track_id']: card for card in request.get('active_tracks', [])
+             if isinstance(card, dict) and isinstance(card.get('track_id'), str)}
+    updates = output.get('track_updates')
+    updated = {row['track_ref'] for row in updates
+               if isinstance(row, dict) and isinstance(row.get('track_ref'), str)} if isinstance(updates, list) else set()
+    declared = set(cards) | {ref for ref in updated if re.fullmatch(r'new:[1-9][0-9]*', ref)}
+    used = []
     for row in output['message_assignments']:
         if (isinstance(row, dict) and isinstance(row.get('primary_track_ref'), str)
                 and isinstance(row.get('context_track_refs'), list)):
             row['context_track_refs'] = [ref for ref in row['context_track_refs']
                                         if ref != row['primary_track_ref']]
+            refs = row['context_track_refs']
+            if (row['primary_track_ref'] in declared and refs
+                    and all(isinstance(ref, str) and ref in declared for ref in refs)
+                    and len(refs) == len(set(refs))
+                    and row.get('routing_role') in {'origin', 'primary_activity', 'landing', 'routine'}):
+                # The model already declared the cross-Track relation. Bridge is
+                # its redundant discriminator; the host adds no reference/owner.
+                row['routing_role'] = 'bridge'
+            used.extend([row['primary_track_ref'], *refs])
+    if isinstance(updates, list):
+        for ref in dict.fromkeys(ref for ref in used if isinstance(ref, str)):
+            card = cards.get(ref)
+            if ref in updated or card is None or not all(key in card for key in ('subject', 'throughline', 'status')):
+                continue
+            updates.append({'track_ref': ref, **{key: card[key] for key in
+                ('subject', 'throughline', 'event_policy', 'status') if key in card}})
+            updated.add(ref)
     return output
 
 
@@ -309,6 +333,10 @@ The complete required source_message_id sequence is:
 context_track_refs must exclude that row's primary_track_ref. If no DIFFERENT
 Track supplies context, use []. A bridge still needs a genuinely different
 valid context Track; never invent one or downgrade its role to repair the schema.
+Nonempty context_track_refs requires routing_role=bridge, even for a reply that
+otherwise acts as a landing. Include one track_updates row for EVERY used Track,
+primary and context, including existing unchanged Tracks. Existing card fields
+may be carried forward exactly; new Tracks require your own grounded card.
 """
     elif role == 'event_curator':
         component = request['component']
