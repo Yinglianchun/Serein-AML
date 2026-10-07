@@ -45,16 +45,18 @@ activity. A shared person, product or topic alone does not join separate activit
 Reuse a visible Track for direct continuation; start new:N for a distinct activity.
 Time gaps alone do not split an activity. Do not write Events or decide admission.
 
-Choose primary_track_ref first. context_track_refs lists only OTHER Tracks that
-this message explicitly answers or closes while advancing its primary activity.
-Ordinary replies within one Track use []; their primary is NEVER also context.
+Choose primary_track_ref from the Track choices (T1, T2...) or start new:N.
+Message numbers identify messages; they are NEVER Track choices.
+Usually omit context_track_refs. Include it only when this message explicitly
+answers or closes a DIFFERENT Track while advancing its primary activity.
+An ordinary reply to the previous message stays on its primary Track and omits it.
 Choose routing_role from the message: origin starts an activity, primary_activity
 advances it, landing responds or concludes it, routine is a greeting/status check.
 Use bridge ONLY when context_track_refs contains a different Track. A reply to an
 earlier message in the SAME Track is not a bridge. Do not invent a second Track.
 
 Return the supplied JSON shape. Every raw message, including assistant replies,
-needs one assignment in input order. Copy existing Track IDs exactly. Recent
+needs one assignment in input order. Use the supplied T-labels for existing Tracks. Recent
 context is read-only: do not assign it. For track_updates, include new Tracks and
 existing cards you actually change; unchanged existing cards are carried by host.
 Only update used Tracks. subject identifies the concrete activity (1..160 chars);
@@ -113,10 +115,14 @@ def writer_payload(request):
             rules = LITE_ROUTER_RULES
             prompt = ('\n'.join(prefix.splitlines()[:2]) + '\nReturn JSON: '
                       '{"message_assignments":[{"source_message_id":1,"primary_track_ref":"new:1",'
-                      '"context_track_refs":[],"routing_role":"primary_activity"}],'
+                      '"routing_role":"primary_activity"}],'
                       '"track_updates":[{"track_ref":"new:1","subject":"concrete activity",'
                       '"throughline":"current continuation","event_policy":"default","status":"active"}]}'
                       '\nRequired source_message_id order: ' + encode([m['id'] for m in request['messages']])
+                      + '\nExisting Track choices (label -> frozen Track ID): ' + encode(router_track_choices(request))
+                      + '\nCross-Track only: optionally add "context_track_refs":["T2"]. '
+                        'These are Track choices, NEVER source_message_id or reply-to message numbers. '
+                        'With one Track, an ordinary reply omits context_track_refs.\n'
                       + '\n' + marker + sources)
     if relaxed_content_review() and request['role'] == 'event_curator' and not request.get('transcription_only'):
         prefix, marker, sources = prompt.partition('<event_curator_input_json>')
@@ -242,6 +248,19 @@ def record_curator_normalization(database, job_id, original, normalized):
             (job_id, encode({'policy': 'safe_subset', 'original': original, 'normalized': normalized})))
 
 
+def router_track_choices(request):
+    """Frozen labels disjoint from message numbers and canonical Track IDs."""
+    ids = list(dict.fromkeys(card['track_id'] for card in request.get('active_tracks', [])
+                            if isinstance(card, dict) and isinstance(card.get('track_id'), str)))
+    choices, number = {}, 1
+    for identifier in ids:
+        while f'T{number}' in ids:
+            number += 1
+        choices[f'T{number}'] = identifier
+        number += 1
+    return choices
+
+
 def prepare_router_output(request, output):
     """Canonicalize declared routes and carry omitted frozen cards, never new links."""
     if (not simplified_authoring() or request['role'] != 'track_router'
@@ -250,6 +269,7 @@ def prepare_router_output(request, output):
     output = copy.deepcopy(output)
     cards = {card['track_id']: card for card in request.get('active_tracks', [])
              if isinstance(card, dict) and isinstance(card.get('track_id'), str)}
+    choices = router_track_choices(request) if relaxed_content_review() else {}
     def track_number(ref):
         match = re.fullmatch(r'(session_[A-Za-z0-9]+_track_)([0-9]+)', ref)
         if match and (ordinal := match[2].lstrip('0')):
@@ -260,6 +280,8 @@ def prepare_router_output(request, output):
         if (number := track_number(ref)) is not None:
             numbers.setdefault(number, []).append(ref)
     def exact_ref(ref):
+        if isinstance(ref, str) and ref in choices:
+            return choices[ref]
         if not isinstance(ref, str) or ref in cards:
             return ref
         number = track_number(ref)
@@ -279,6 +301,8 @@ def prepare_router_output(request, output):
     declared = set(cards) | {ref for ref in updated if re.fullmatch(r'new:[1-9][0-9]*', ref)}
     used = []
     for row in output['message_assignments']:
+        if relaxed_content_review() and isinstance(row, dict):
+            row.setdefault('context_track_refs', [])
         if (isinstance(row, dict) and isinstance(row.get('primary_track_ref'), str)
                 and isinstance(row.get('context_track_refs'), list)):
             row['primary_track_ref'] = exact_ref(row['primary_track_ref'])
@@ -622,6 +646,10 @@ HOST_IDS:
             if not received or attempt == attempts - 1:
                 raise
             correction = '\nHost validation failed. Keep the original IDs and evidence; return the full corrected JSON.\n' + str(error)
+            if role == 'track_router' and 'invalid context Track' in str(error):
+                correction += ('\ncontext_track_refs means OTHER ACTIVITY TRACKS, not previous messages. '
+                               'Never put message numbers there. Use only the frozen T-label choices or new:N. '
+                               'For replies on the same Track, omit context_track_refs; choose the actual non-bridge role.')
             if role == 'track_router' and 'bridge role must match' in str(error):
                 correction += ('\nA same-Track reply is not a bridge. Re-read the affected message: '
                                'choose its non-bridge role when it stays on one Track, or identify '

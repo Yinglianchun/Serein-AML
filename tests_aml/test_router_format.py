@@ -10,6 +10,34 @@ from serein.extensions import pipeline
 from test_engine import memory, role_output, add
 
 
+def test_frozen_track_labels_and_optional_context(monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING','1')
+    monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW','1')
+    task={'role':'track_router','active_tracks':[
+        {'track_id':'session_a_track_0001','subject':'A','throughline':'A task','status':'active'},
+        {'track_id':'session_a_track_0002','subject':'B','throughline':'B task','status':'active'}]}
+    raw={'message_assignments':[
+        {'source_message_id':21,'primary_track_ref':'T1','routing_role':'landing'},
+        {'source_message_id':22,'primary_track_ref':'T2','context_track_refs':['T1'],'routing_role':'bridge'}],
+        'track_updates':[]}
+    before=copy.deepcopy(raw)
+    result=runtime.prepare_router_output(task,raw)
+    assert raw==before
+    assert result['message_assignments'][0]['context_track_refs']==[]
+    assert result['message_assignments'][0]['primary_track_ref']=='session_a_track_0001'
+    assert result['message_assignments'][1]['context_track_refs']==['session_a_track_0001']
+    assert {r['track_ref'] for r in result['track_updates']}=={'session_a_track_0001','session_a_track_0002'}
+    raw['message_assignments'][0]['context_track_refs']=[20]
+    assert runtime.prepare_router_output(task,raw)['message_assignments'][0]['context_track_refs']==[20]
+    monkeypatch.delenv('SEREIN_AML_RELAX_CONTENT_REVIEW')
+    assert runtime.prepare_router_output(task,before)['message_assignments'][0]['primary_track_ref']=='T1'
+
+
+def test_track_labels_do_not_shadow_canonical_ids():
+    task={'active_tracks':[{'track_id':'real_track'},{'track_id':'T1'}]}
+    assert runtime.router_track_choices(task)=={'T2':'real_track','T3':'T1'}
+
+
 def test_lite_router_repairs_self_bridge_by_model_decision(memory, monkeypatch):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')

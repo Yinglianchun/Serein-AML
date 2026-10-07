@@ -172,6 +172,15 @@ the host does not guess a replacement role or manufacture a second Track. This
 prompt simplification preserves the existing profile, saved requests and public
 validation, so paused jobs can use public retry without replacing their database.
 
+Under that same relaxed profile, Router now receives frozen `T1`, `T2`, ...
+choices for existing Tracks. Message IDs remain numbers and cannot be used as
+Track choices. Ordinary same-Track replies may omit `context_track_refs`; the
+host supplies an empty list. A real cross-Track connection must explicitly name
+another supplied choice (or a declared `new:N`). The host resolves labels to the
+original frozen IDs and audits the representation change. Numeric reply-to IDs,
+unknown choices and unsupported bridges are not guessed into valid relations.
+This is an input/output representation change, not a new ownership policy.
+
 Scout uses the public normalizer's bounded safe candidate subset rather than asking
 the model to restore discarded candidates or justify them. Its audit records the
 proposed count and accepted candidates. Invalid source/target references are still
