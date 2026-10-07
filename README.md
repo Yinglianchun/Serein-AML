@@ -4,6 +4,25 @@ Serein adapted for the **Agent Memory Leaderboard (Cycle 2, Textual Memory)**.
 
 This repository imports the published Serein backend from commit `b5b13800ad086ea763afd9008ef3bdbfbb83c75b` (public release `0.1.0-rc65`) and keeps the competition changes separate and auditable.
 
+## 流程图与设计论文
+
+[AML 完整流程图与比赛边界](docs/aml-flow.md) · [公开版流程图](docs/aml-flow.md#公开版设计图) · [论文 PDF](docs/paper/pdf/event-memory-paper.zh-CN.pdf) · [论文 Markdown](docs/paper/manuscript.zh-CN.md) · [图表与阅读说明](docs/paper/README.md)
+
+```mermaid
+flowchart LR
+    A["Add：历史消息"] --> B["原话归档与 Track 归线"]
+    B --> C["Curator / Writer 形成 Event"]
+    C --> D["记忆索引与可选叙事材料目录"]
+    Q["Search：明确问题"] --> R["混合检索"]
+    D --> R
+    R --> S["有缺口时读菜单材料"]
+    S --> T["正文优先，必要时回读原话"]
+    T --> U["返回有出处的证据片段"]
+    U --> V["平台固定的回答与评分"]
+```
+
+图示包含可选路径，具体开关见下文。论文《**从交错对话到可追溯 Event：持续归线、延迟结算与来源归属的系统案例研究**》由 **ChiYouyu · Haven** 署名，随附中文 v0.19 阅读版及补充材料。它记录设计、历史实验和失败案例，**不是 AML 成绩报告**。比赛版已简化部分编辑审查与引用协议；论文原有实验条件和结论保持不变，差异见[流程说明](docs/aml-flow.md#论文与比赛版的关系)。
+
 ## What this leaderboard result covers
 
 AML evaluates this adapter's synchronous conversation ingestion and question-driven

@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1300" viewBox="0 0 1240 1300" role="img" aria-labelledby="title desc">
+  <title id="title">Serein 自动 Event 流水线</title>
+  <desc id="desc">白天在同一会话至少积累五个完整回复包且静默至少二十分钟后归线；回复包用于调度，每条消息仍逐条归线。桥接共同阅读不自动增加来源，Curator 显式决定归属。图片独立逐张转录，Writer 读取原话和已校验转录，不接收原图。程序核对结构、来源及可选证据收据，不保证正文语义准确。文字步骤累计失败三次后暂停，成功步骤保留，同一聊天等待，其他聊天继续；图片单独计失败预算。成功后直接保存为 Serein Event，Arc 归档和主模型编辑为 Scene 均为落库后的可选操作。</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8f8f4"/>
+      <stop offset="1" stop-color="#f1f4ef"/>
+    </linearGradient>
+    <linearGradient id="canonical" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e3eee9"/>
+      <stop offset="1" stop-color="#eef4f0"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-20%" width="130%" height="145%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#24332f" flood-opacity=".07"/>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L8 4L0 8Z" fill="#71817b"/>
+    </marker>
+    <style>
+      text{font-family:"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;fill:#263631}
+      .eyebrow{font-size:13px;font-weight:700;letter-spacing:2.4px;fill:#587871}
+      .title{font-size:32px;font-weight:700;letter-spacing:.2px}
+      .subtitle{font-size:15px;fill:#6a7873}
+      .stage-no{font-size:13px;font-weight:700;letter-spacing:1.6px;fill:#6b7e77}
+      .stage-title{font-size:20px;font-weight:700}
+      .node-title{font-size:17px;font-weight:700}
+      .node-copy{font-size:13.5px;fill:#5d6d67}
+      .small{font-size:12.5px;fill:#71807a}
+      .chip{font-size:12px;font-weight:700;letter-spacing:.7px;fill:#526861}
+      .rule{stroke:#d7ded9;stroke-width:1}
+      .line{fill:none;stroke:#71817b;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}
+      .optional-line{fill:none;stroke:#9aa8a2;stroke-width:1.4;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}
+      .node{fill:#fff;stroke:#c8d2cd;stroke-width:1.2}
+      .model{fill:#fbf8f0;stroke:#d8c8a7;stroke-width:1.2}
+      .host{fill:#edf3ef;stroke:#9eb4ab;stroke-width:1.2}
+      .store{fill:url(#canonical);stroke:#587871;stroke-width:1.6}
+    </style>
+  </defs>
+
+  <rect width="1240" height="1300" rx="32" fill="url(#paper)"/>
+  <circle cx="1150" cy="78" r="26" fill="#dce8e2"/>
+  <path d="M1150 59c-8 10-13 17-13 25a13 13 0 0 0 26 0c0-8-5-15-13-25Z" fill="#587871" opacity=".82"/>
+
+  <text x="56" y="54" class="eyebrow">SEREIN · AUTOMATIC EVENT</text>
+  <text x="56" y="94" class="title">原话，怎样长成一条 Event</text>
+  <text x="56" y="121" class="subtitle">模型负责归线、切分与写作；Serein 冻结归属、执行保护与结算。</text>
+  <rect x="56" y="141" width="304" height="30" rx="15" fill="#e3ece7"/>
+  <text x="208" y="161" text-anchor="middle" class="chip">三个语义阶段 · 图片转录独立处理</text>
+
+  <!-- 01 / source and schedule -->
+  <line x1="56" y1="202" x2="1184" y2="202" class="rule"/>
+  <text x="56" y="233" class="stage-no">01 · SOURCE &amp; CLOCK</text>
+  <text x="250" y="233" class="stage-title">先等一段对话真正完整</text>
+
+  <path d="M258 308H310" class="line"/>
+  <path d="M570 308H624" class="line"/>
+  <path d="M1152 358V386H1206V495H1160" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="264" width="202" height="88" rx="18" class="node"/>
+    <rect x="310" y="252" width="260" height="112" rx="18" class="host"/>
+    <rect x="624" y="252" width="560" height="112" rx="18" class="node"/>
+  </g>
+  <text x="78" y="296" class="node-title">原始消息</text>
+  <text x="78" y="321" class="node-copy">Serein 持续归档</text>
+  <text x="78" y="343" class="small">成功回复 · 正文 · 附件</text>
+
+  <text x="334" y="284" class="node-title">完整回复包 · 用于调度</text>
+  <text x="334" y="310" class="node-copy">一问一答 / 主动发起后的回应</text>
+  <text x="334" y="335" class="small">未完成尾巴继续等待</text>
+
+  <text x="650" y="282" class="node-title">两种调度时机</text>
+  <line x1="898" y1="271" x2="898" y2="345" stroke="#d8ded9"/>
+  <text x="650" y="310" class="chip">DAYTIME · 两项同时满足</text>
+  <text x="650" y="333" class="node-copy">同一会话 ≥ 5 个完整回复包</text>
+  <text x="650" y="353" class="small">且会话静默 ≥ 20 分钟</text>
+  <text x="924" y="310" class="chip">03:00 · ASIA/SHANGHAI</text>
+  <text x="924" y="334" class="node-copy">稳定材料结算 · 活跃尾部等待</text>
+
+  <text x="624" y="393" class="small">回复包只粗分等待边界 · 每条消息仍由 Track Router 逐条归线</text>
+
+  <!-- 02 / route and curate, right to left -->
+  <line x1="56" y1="410" x2="1184" y2="410" class="rule"/>
+  <text x="56" y="441" class="stage-no">02 · ROUTE &amp; CURATE</text>
+  <text x="250" y="441" class="stage-title">先归线，再决定 Event 边界与原文归属</text>
+
+  <path d="M900 519H840" class="line"/>
+  <path d="M502 519H440" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="900" y="475" width="260" height="102" rx="18" class="model"/>
+    <rect x="502" y="463" width="338" height="126" rx="18" class="model"/>
+    <rect x="56" y="463" width="384" height="126" rx="18" class="host"/>
+  </g>
+  <text x="924" y="506" class="chip">MODEL 1</text>
+  <text x="924" y="535" class="node-title">Track Router · 归线</text>
+  <text x="924" y="559" class="node-copy">Track 不是 Event 边界</text>
+
+  <text x="526" y="494" class="chip">MODEL 2</text>
+  <text x="526" y="523" class="node-title">Curator · 切分整理</text>
+  <text x="526" y="548" class="node-copy">create / extend / merge</text>
+  <text x="526" y="571" class="small">或 skip / defer · 图片先逐张转录</text>
+
+  <text x="80" y="494" class="chip">DETERMINISTIC HOST</text>
+  <text x="80" y="523" class="node-title">校验判断回执 · 冻结来源归属</text>
+  <text x="80" y="548" class="node-copy">桥接共同阅读，不自动增加来源</text>
+  <text x="80" y="571" class="small">保护旧 Event · 按实际共享来源联动暂缓</text>
+
+  <rect x="530" y="607" width="282" height="32" rx="16" fill="#f3eee2"/>
+  <text x="671" y="628" text-anchor="middle" class="chip">逐图转录并复用 · 转录不扩大归属</text>
+
+  <path d="M80 589V668H32V751H56" class="line"/>
+
+  <!-- 03 / write and settle -->
+  <line x1="56" y1="675" x2="1184" y2="675" class="rule"/>
+  <text x="56" y="706" class="stage-no">03 · WRITE &amp; SETTLE</text>
+  <text x="250" y="706" class="stage-title">只用冻结材料写作，再由程序决定能不能落库</text>
+
+  <path d="M302 793H354" class="line"/>
+  <path d="M616 793H668" class="line"/>
+  <path d="M926 793H978" class="line"/>
+  <path d="M1081 849V910H1206V991H1184" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="743" width="246" height="108" rx="18" class="host"/>
+    <rect x="354" y="743" width="262" height="108" rx="18" class="model"/>
+    <rect x="668" y="731" width="258" height="132" rx="18" class="host"/>
+    <rect x="978" y="743" width="206" height="108" rx="18" class="host"/>
+  </g>
+  <text x="80" y="775" class="node-title">冻结材料包</text>
+  <text x="80" y="800" class="node-copy">owned / context_only 原话</text>
+  <text x="80" y="823" class="small">前版正文 · 已校验转录</text>
+
+  <text x="378" y="775" class="chip">MODEL 3</text>
+  <text x="378" y="804" class="node-title">Event Writer</text>
+  <text x="378" y="829" class="node-copy">原话与转录写作 · 不接收原图</text>
+
+  <text x="692" y="763" class="node-title">结构校验 / 有限修复</text>
+  <text x="692" y="789" class="node-copy">结构、来源、可选证据收据</text>
+  <text x="692" y="813" class="node-copy">校验不证明正文语义准确</text>
+  <text x="692" y="839" class="small">文字步骤累计失败三次后暂停</text>
+
+  <text x="1002" y="775" class="node-title">幂等结算</text>
+  <text x="1002" y="800" class="node-copy">create / replace</text>
+  <text x="1002" y="823" class="small">写入 receipt · 可安全重试</text>
+
+  <text x="620" y="887" text-anchor="middle" class="small">失败恢复：成功步骤保留 · 同一聊天等待，其他聊天继续 · 图片单独计失败预算</text>
+
+  <!-- 04 / canonical and downstream -->
+  <line x1="56" y1="904" x2="1184" y2="904" class="rule"/>
+  <text x="56" y="935" class="stage-no">04 · CANONICAL RESULT</text>
+  <text x="270" y="935" class="stage-title">成功之后，正式 Event 才出现</text>
+
+  <g filter="url(#shadow)">
+    <rect x="844" y="958" width="340" height="104" rx="20" class="store"/>
+  </g>
+  <text x="868" y="989" class="chip">SEREIN CANONICAL STORE</text>
+  <text x="868" y="1018" class="node-title">Event + 原话证据绑定</text>
+  <text x="868" y="1042" class="node-copy">revision · replacement · settlement receipt</text>
+
+  <text x="80" y="989" class="chip">DIRECT COMMIT</text>
+  <text x="80" y="1018" class="node-title">Event 到这里已经落库</text>
+  <text x="80" y="1042" class="node-copy">正文、原话绑定与回执一并完成</text>
+
+  <path d="M1014 1062V1092H616V1116" class="optional-line"/>
+  <path d="M1014 1092H1004V1116" class="optional-line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="436" y="1116" width="360" height="88" rx="18" class="node"/>
+    <rect x="824" y="1116" width="360" height="88" rx="18" class="node"/>
+  </g>
+  <text x="460" y="1147" class="node-title">可选 · 自动归入已有叙事卷</text>
+  <text x="460" y="1173" class="node-copy">关键词检索 → Arc Linker 判断</text>
+  <text x="460" y="1193" class="small">不读原话 · 不依赖实体打标</text>
+
+  <text x="848" y="1147" class="node-title">可选 · Event 升为 Scene</text>
+  <text x="848" y="1173" class="node-copy">主模型读原话后编辑并保存</text>
+
+  <rect x="56" y="1250" width="1128" height="30" rx="15" fill="#f2ede1"/>
+  <text x="620" y="1270" text-anchor="middle" class="chip">Arc 归档与 Scene 升级都是落库后可选项 · 不会把失败伪装成已结算</text>
+</svg>

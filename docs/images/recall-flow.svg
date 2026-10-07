@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1180" viewBox="0 0 1240 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Serein 自动召回流程</title>
+  <desc id="desc">自动召回分为资格、候选和命中交付三段。候选信号只负责提名，正文重排决定命中，交付记录证明实际送入。</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8f8f4"/>
+      <stop offset="1" stop-color="#f1f4ef"/>
+    </linearGradient>
+    <linearGradient id="delivery" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e7f0eb"/>
+      <stop offset="1" stop-color="#edf3ef"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-20%" width="130%" height="145%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#24332f" flood-opacity=".07"/>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L8 4L0 8Z" fill="#71817b"/>
+    </marker>
+    <style>
+      text{font-family:"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;fill:#263631}
+      .eyebrow{font-size:13px;font-weight:700;letter-spacing:2.4px;fill:#587871}
+      .title{font-size:32px;font-weight:700;letter-spacing:.2px}
+      .subtitle{font-size:15px;fill:#6a7873}
+      .stage-no{font-size:13px;font-weight:700;letter-spacing:1.6px;fill:#6b7e77}
+      .stage-title{font-size:20px;font-weight:700}
+      .stage-note{font-size:14px;fill:#7a8782}
+      .node-title{font-size:17px;font-weight:700}
+      .node-copy{font-size:13.5px;fill:#5d6d67}
+      .small{font-size:12.5px;fill:#71807a}
+      .chip{font-size:12px;font-weight:700;letter-spacing:.7px;fill:#526861}
+      .rule{stroke:#d7ded9;stroke-width:1}
+      .line{fill:none;stroke:#71817b;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}
+      .bus{fill:none;stroke:#9aa8a2;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+      .node{fill:#fff;stroke:#c8d2cd;stroke-width:1.2}
+      .gate{fill:#edf3ef;stroke:#9eb4ab;stroke-width:1.2}
+      .signal{fill:#fbf8f0;stroke:#d8c8a7;stroke-width:1.2}
+      .pool{fill:#fff;stroke:#7f9d92;stroke-width:1.5}
+      .final{fill:#f6faf7;stroke:#6f9185;stroke-width:1.5}
+    </style>
+  </defs>
+
+  <rect width="1240" height="1180" rx="32" fill="url(#paper)"/>
+  <circle cx="1150" cy="78" r="26" fill="#dce8e2"/>
+  <path d="M1150 59c-8 10-13 17-13 25a13 13 0 0 0 26 0c0-8-5-15-13-25Z" fill="#587871" opacity=".82"/>
+
+  <text x="56" y="54" class="eyebrow">SEREIN · RECALL PIPELINE</text>
+  <text x="56" y="94" class="title">一段记忆，怎样真正进入上下文</text>
+  <text x="56" y="121" class="subtitle">提名不是命中，渲染不是注入。每一道边界都留下自己的证据。</text>
+
+  <!-- 01 / eligibility -->
+  <line x1="56" y1="159" x2="1184" y2="159" class="rule"/>
+  <text x="56" y="190" class="stage-no">01 · ELIGIBILITY</text>
+  <text x="220" y="190" class="stage-title">先判断：这轮要不要找、哪些记忆有资格参与</text>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="224" width="180" height="92" rx="18" class="node"/>
+    <rect x="294" y="224" width="202" height="92" rx="18" class="gate"/>
+    <rect x="554" y="211" width="336" height="118" rx="18" class="gate"/>
+    <rect x="948" y="224" width="236" height="92" rx="18" class="node"/>
+  </g>
+
+  <rect x="76" y="242" width="54" height="22" rx="11" fill="#edf2ef"/>
+  <text x="103" y="258" text-anchor="middle" class="chip">INPUT</text>
+  <text x="76" y="286" class="node-title">原句</text>
+  <text x="76" y="307" class="node-copy">query embedding × 1</text>
+
+  <text x="316" y="258" class="node-title">语义路由预检</text>
+  <text x="316" y="283" class="node-copy">skip / recall 边界</text>
+  <text x="316" y="304" class="small">可以在候选生成前结束</text>
+
+  <text x="578" y="245" class="node-title">批量资格过滤</text>
+  <text x="578" y="270" class="node-copy">active · 可浮现 · 当前 revision</text>
+  <text x="578" y="293" class="node-copy">排除替换 Event / 完整覆盖的 Event</text>
+  <text x="578" y="316" class="small">主域 · exclude_ids · 旧索引版本</text>
+
+  <text x="972" y="258" class="node-title">Event + Scene</text>
+  <text x="972" y="283" class="node-copy">得到可检索对象</text>
+  <text x="972" y="304" class="small">不合格对象不解码、不打分</text>
+
+  <path d="M236 270H294" class="line"/>
+  <path d="M496 270H554" class="line"/>
+  <path d="M890 270H948" class="line"/>
+
+  <!-- 02 / nomination -->
+  <line x1="56" y1="367" x2="1184" y2="367" class="rule"/>
+  <text x="56" y="398" class="stage-no">02 · NOMINATION</text>
+  <text x="220" y="398" class="stage-title">四种信号，只负责把候选送到门口</text>
+  <path d="M1066 316V346H1206V438H184" class="bus"/>
+  <path d="M184 438V459M474 438V459M764 438V459M1056 438V459" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="459" width="256" height="112" rx="18" class="signal"/>
+    <rect x="346" y="459" width="256" height="112" rx="18" class="signal"/>
+    <rect x="636" y="459" width="256" height="112" rx="18" class="signal"/>
+    <rect x="926" y="459" width="258" height="112" rx="18" class="signal"/>
+  </g>
+
+  <text x="78" y="493" class="node-title">正文 / passage 向量</text>
+  <text x="78" y="519" class="node-copy">相似度与 freshness 排序</text>
+  <text x="78" y="544" class="small">扩展默认 ≥ 0.50</text>
+
+  <text x="368" y="493" class="node-title">Scene cue 语义</text>
+  <text x="368" y="519" class="node-copy">语义接近，不要求逐字相同</text>
+  <text x="368" y="544" class="small">扩展默认 ≥ 0.55</text>
+
+  <text x="658" y="493" class="node-title">Event 特定关键词</text>
+  <text x="658" y="519" class="node-copy">具体词提供候选入口</text>
+  <text x="658" y="544" class="small">泛词不把候选池撑大</text>
+
+  <text x="948" y="493" class="node-title">完整实体名</text>
+  <text x="948" y="519" class="node-copy">需要回忆意图 / 明确结构</text>
+  <text x="948" y="544" class="small">只提名，不代表 Arc 关系</text>
+
+  <path d="M184 571V602M474 571V602M764 571V602M1055 571V602M184 602H1055" class="bus"/>
+  <path d="M620 602V624" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="418" y="624" width="404" height="96" rx="20" class="pool"/>
+  </g>
+  <rect x="442" y="642" width="76" height="22" rx="11" fill="#dfeae5"/>
+  <text x="480" y="658" text-anchor="middle" class="chip">ONE POOL</text>
+  <text x="442" y="690" class="node-title">Event + Scene 混合候选池</text>
+  <text x="442" y="712" class="node-copy">前 6 条宽探针 · 其余候选须有扩展证据</text>
+
+  <rect x="56" y="630" width="288" height="80" rx="16" fill="#f7f7f3" stroke="#cbd3ce"/>
+  <text x="78" y="661" class="node-title">已确认 Scene 关系</text>
+  <text x="78" y="686" class="node-copy">最多带入 1 个邻接候选 · 不加分</text>
+  <path d="M344 670H418" class="line"/>
+
+  <!-- 03 / admission and delivery -->
+  <line x1="56" y1="760" x2="1184" y2="760" class="rule"/>
+  <text x="56" y="791" class="stage-no">03 · ADMISSION → DELIVERY</text>
+  <text x="720" y="791" class="stage-title">只有正文判断通过，才可能真正送入</text>
+
+  <path d="M620 720V824" class="line"/>
+  <g filter="url(#shadow)">
+    <rect x="395" y="824" width="450" height="92" rx="20" class="final"/>
+  </g>
+  <text x="419" y="855" class="node-title">正文 reranker</text>
+  <text x="419" y="882" class="node-copy">完整原句 × 候选正文</text>
+  <rect x="684" y="846" width="137" height="34" rx="17" fill="#dfeae5"/>
+  <text x="752" y="868" text-anchor="middle" class="chip">最终门槛 ≥ 0.65</text>
+
+  <path d="M620 916V944" class="line"/>
+  <g filter="url(#shadow)">
+    <rect x="395" y="944" width="450" height="76" rx="18" class="node"/>
+  </g>
+  <text x="419" y="976" class="node-title">选卡与会话冷却</text>
+  <text x="419" y="1001" class="node-copy">默认最多 2 张 · 胜出后检查冷却 · 取消后不补位</text>
+
+  <path d="M620 1020V1044" class="line"/>
+  <g filter="url(#shadow)">
+    <rect x="180" y="1044" width="880" height="102" rx="22" fill="url(#delivery)" stroke="#587871" stroke-width="1.6"/>
+  </g>
+  <line x1="620" y1="1060" x2="620" y2="1130" stroke="#b8c8c1"/>
+  <text x="208" y="1075" class="chip">GATEWAY</text>
+  <text x="208" y="1105" class="node-title">直接加入准备好的卡片</text>
+  <text x="208" y="1128" class="small">准备结果与渲染仍各自留痕</text>
+  <text x="648" y="1075" class="chip">HOST HOOK</text>
+  <text x="648" y="1105" class="node-title">由宿主实际注入并登记</text>
+  <text x="648" y="1128" class="small">以 injected IDs / hook outcome 证明送入</text>
+</svg>
