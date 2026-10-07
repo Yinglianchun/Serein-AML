@@ -97,6 +97,8 @@ def prepare_curator_output(request, output):
                 if not set(unit['source_message_ids']) & stable}
     output = copy.deepcopy(output)
     if relaxed_content_review() and isinstance(output.get('events'), list):
+        allowed_tracks = set(component.get('track_ids', []))
+        visible_tracks = allowed_tracks | {unit.get('track_id') for unit in component['memberships']}
         retained = []
         for event in output['events']:
             # A create proposal may select visible, read-only context as owned.
@@ -105,13 +107,14 @@ def prepare_curator_output(request, output):
             if (isinstance(event, dict) and set(event) == {
                     'action', 'base_event_ids', 'primary_track_id', 'owned_unit_roots'}
                     and event['action'] == 'create' and event['base_event_ids'] == []
-                    and event['primary_track_id'] in component.get('track_ids', [])
+                    and isinstance(event['primary_track_id'], str)
                     and isinstance(event['owned_unit_roots'], list)):
                 roots = event['owned_unit_roots']
                 filtered = [root for root in roots if not (type(root) is int and root in readonly)]
-                if roots and not filtered:
+                if roots and not filtered and event['primary_track_id'] in visible_tracks:
                     continue  # No writable source: do not invent an Event.
-                event['owned_unit_roots'] = filtered
+                if event['primary_track_id'] in allowed_tracks:
+                    event['owned_unit_roots'] = filtered
             retained.append(event)
         output['events'] = retained
     review = output.get('decision_review')

@@ -135,6 +135,9 @@ and original decision are stored in `aml_curator_normalizations`; the literal mo
 reply is still archived unchanged. Unselected/skipped originals stay retrievable,
 and read-only tails stay unprocessed. This format recovery keeps the existing v3
 profile and data compatible; it does not convert an invalid proposal into a memory.
+An empty-source proposal may name another Track explicitly present in the frozen
+memberships; that entire proposal is also discarded, without admitting that Track
+as a valid primary owner. Mixed proposals still require an allowed primary Track.
 
 Before returning a volume body, Search also checks that its current Event/Scene materials are readable and allowed for the original question. AML-authored prose must still match its committed source snapshot, selected membership, title/focus and body hash. Changed or newly linked materials suppress the old prose until it is rewritten; independently eligible individual materials remain available.
 
