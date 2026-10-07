@@ -106,6 +106,18 @@ def curator_event_scope(component):
     return {'allowed_primary_track_ids': allowed, 'stable_units_on_other_tracks': external}
 
 
+def curator_unit_choices(component):
+    """Name only complete frozen stable units; predecessor sources are not choices."""
+    stable = {message['id'] for message in component.get('messages', [])}
+    roots = []
+    for unit in component.get('memberships', []):
+        sources = set(unit.get('source_message_ids') or [unit['unit_root_message_id']])
+        root = unit['unit_root_message_id']
+        if sources and sources <= stable and root not in roots:
+            roots.append(root)
+    return {f'U{index}': root for index, root in enumerate(roots, 1)}
+
+
 def writer_payload(request):
     """Shorten instructions and neutralize viewpoint labels; retain source evidence."""
     rules, prompt = request['rules'], request['prompt']
@@ -133,7 +145,11 @@ def writer_payload(request):
                      'No decision_review, quotes, activity audit, material review or admission is required.')
             prompt = ('\n'.join(prefix.splitlines()[:2]) + '\nReturn JSON: '
                       '{"events":[{"action":"create","base_event_ids":[],"primary_track_id":"actual track ID",'
-                      '"owned_unit_roots":[1]}],"skip_unit_roots":[],"defer_unit_roots":[]}. '
+                      '"owned_unit_roots":["U1"]}],"skip_unit_roots":[],"defer_unit_roots":[]}. '
+                      'Choose U-labels from Writable unit choices below for owned/skip/defer lists. '
+                      'Each label means the complete dialogue unit, not an individual message. '
+                      'Old Event source IDs are already stored: NEVER put them in owned/skip/defer lists. '
+                      'To continue an old Event, choose its base_event_id and own only the NEW U-labels. '
                       'Every Event primary_track_id MUST be in allowed_primary_track_ids below. '
                       'Visible unit primary_track/context_tracks and Track cards do not enlarge that list. '
                       'A stable unit on another Track may supply declared bridge evidence to an allowed Event '
@@ -147,6 +163,7 @@ def writer_payload(request):
                       '{"context_request":{"track_id":"allowed track ID","before_message_id":1,'
                       '"reason":"missing_subject|missing_origin|missing_prior_claim"}}.\n'
                       'Host Event scope: ' + encode(curator_event_scope(request['component']))
+                      + '\nWritable unit choices (label -> stable root): ' + encode(curator_unit_choices(request['component']))
                       + '\n' + marker + sources)
     if simplified_authoring() and request['role'] == 'event_writer' and not request.get('transcription_only'):
         prefix, marker, sources = prompt.partition('<event_reading_block_json>')
@@ -181,6 +198,14 @@ def prepare_curator_output(request, output):
     readonly = {unit['unit_root_message_id'] for unit in component['memberships']
                 if not set(unit['source_message_ids']) & stable}
     output = copy.deepcopy(output)
+    if relaxed_content_review():
+        choices = curator_unit_choices(component)
+        rows = output.get('events') if isinstance(output.get('events'), list) else []
+        for row, field in [(output, 'skip_unit_roots'), (output, 'defer_unit_roots')] + [
+                (event, 'owned_unit_roots') for event in rows if isinstance(event, dict)]:
+            if isinstance(row.get(field), list):
+                row[field] = [choices.get(value, value) if isinstance(value, str) else value
+                              for value in row[field]]
     if relaxed_content_review() and isinstance(output.get('events'), list):
         allowed_tracks = set(component.get('track_ids', []))
         visible_tracks = allowed_tracks | {unit.get('track_id') for unit in component['memberships']}
@@ -578,6 +603,8 @@ may be carried forward exactly; new Tracks require your own grounded card.
                         if set(unit['source_message_ids']) & stable})
         constraints = {'stable_unit_roots': roots, 'primary_track_ids':component['track_ids'],
                        'available_base_event_ids':[item['event_id'] for item in component['base_event_candidates']]}
+        if relaxed_content_review():
+            constraints['writable_unit_choices'] = curator_unit_choices(component)
         reminder = ('' if relaxed_content_review() else CURATOR_FORMAT) + """
 Host structure constraints for this frozen task are below. These are IDs, not
 evidence or a requested semantic decision. Account for every stable unit root
@@ -646,6 +673,11 @@ HOST_IDS:
             if not received or attempt == attempts - 1:
                 raise
             correction = '\nHost validation failed. Keep the original IDs and evidence; return the full corrected JSON.\n' + str(error)
+            if role == 'event_curator' and 'invalid unit root' in str(error) and relaxed_content_review():
+                correction += ('\nSelect only these writable U-labels for owned/skip/defer: '
+                               + encode(curator_unit_choices(request['component']))
+                               + '. Prior Event source IDs are read-only history, not new ownership. '
+                                 'Use base_event_ids to continue a prior Event; reassess the new units themselves.')
             if role == 'track_router' and 'invalid context Track' in str(error):
                 correction += ('\ncontext_track_refs means OTHER ACTIVITY TRACKS, not previous messages. '
                                'Never put message numbers there. Use only the frozen T-label choices or new:N. '
