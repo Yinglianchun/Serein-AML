@@ -50,6 +50,10 @@ class AddConflict(ValueError):
     """The same request_id was reused with different content."""
 
 
+class SearchInputError(ValueError):
+    """The caller's Search input exceeds the enabled adapter budget."""
+
+
 @dataclass(frozen=True)
 class UserPaths:
     root: Path
@@ -458,7 +462,7 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
     if not query.strip():
         return []
     if source_evidence.enabled() and len(encode([query, options or []]).encode('utf-8')) > source_evidence.input_limit() // 2:
-        raise ValueError('AML Search question/options exceed the input budget')
+        raise SearchInputError('AML Search question/options exceed the input budget')
     top_k = max(1, min(100, int(top_k)))
     paths = _paths(user_id)
     if not paths.database.exists() or not paths.index.exists():
