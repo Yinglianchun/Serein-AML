@@ -81,3 +81,9 @@ AML 使用明确问题的 lookup 路径。上图中的日常自动浮现、冷�
 | 实验结论 | E1–E10 各自条件下的案例 | 不改写为 AML 成绩，不宣称组件贡献已独立测定 |
 
 文档导入版本单独记录在 [`upstream-serein.json`](../upstream-serein.json)，不改变其中固定的后端基线。仅复制已在公开仓库跟踪的阅读文件；不附带运行库、原始评测问题、私有研究包或模型凭据。
+
+## Curator 可写 root 编号
+
+简化 Curator 的新提示、示例、HOST_IDS 和重试纠正只使用真实可写 `unit_root_message_id` 整数，不另设连续 U 编号。列表仅包括完整冻结 stable unit，示例取实际首个可写 root；没有可写 unit 时不编造示例 root。非连续消息 ID 不需要重编号。
+
+历史 U-label 仍按原 memberships 顺序解释：例如真实 roots 为 `[1,2,3,4,5,6,8,9,10,11,12]` 时，旧 U8 仍代表 9，U12 仍无效；不得按新含义重播旧 literal 或自动补齐/丢弃选择。已保存整数结果、frozen request、runtime profile revision、完整 unit 所有权、base/context 只读、bridge、重复/未知 root 及 source accounting 契约不变。提示简化不证明模型的新语义决定正确，失败结果仍需重新判断。
