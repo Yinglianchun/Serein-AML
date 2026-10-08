@@ -32,6 +32,7 @@ from serein.recall.query import Query
 from serein.recall.scene import domain_rejection
 from . import runtime, originals, bridges, narratives, arc_planning
 from . import evidence as source_evidence
+from . import delivery
 
 
 MODEL = "gpt-4o-mini"
@@ -458,7 +459,7 @@ def _gap_candidate(services, prepared, query, searches, candidates):
     return {"hit": best[3], "group": best[4], "missing": best[4]["plan"]["missing"]}
 
 
-def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
+def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
     if not query.strip():
         return []
     if source_evidence.enabled() and len(encode([query, options or []]).encode('utf-8')) > source_evidence.input_limit() // 2:
@@ -473,6 +474,8 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
 
     def add_ranked(hits: list[dict[str, Any]], weight: float) -> None:
         for rank, hit in enumerate(hits, 1):
+            if hit["id"] not in candidates:
+                delivery.observe("found", hit["id"], length=len(hit.get("content", "")))
             candidates.setdefault(hit["id"], hit)
             scores[hit["id"]] = scores.get(hit["id"], 0.0) + weight / (60.0 + rank)
 
@@ -497,6 +500,8 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
 
         source_hits = originals.hits(prepared, query, plan["queries"] + plan["entities"])
         for rank, hit in enumerate(source_hits, 1):
+            if hit["id"] not in candidates:
+                delivery.observe("found", hit["id"], length=len(hit.get("content", "")))
             candidates[hit["id"]] = hit
             scores[hit["id"]] = .85 / (60 + rank)
         direct = sorted(scores, key=lambda item: (-scores[item], item))[:bridges.MAX_SEEDS]
@@ -655,14 +660,17 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     continue
                 current = reader.read(document_id, kind=hit["kind"], with_evidence=False)
                 if not current["readable"]:
+                    delivery.observe("rejected", document_id, reason="UNREADABLE")
                     continue
                 document = current["document"]
                 if domain_rejection(document, original_query, policy):
+                    delivery.observe("rejected", document_id, reason="DOMAIN_FILTER")
                     continue
                 if hit["kind"] == "narrative" and not narratives.readable_for_search(
                         prepared, reader, document_id, original_query, policy):
                     continue
                 if document.get("revision") != hit["document"].get("revision"):
+                    delivery.observe("rejected", document_id, reason="SOURCE_CHANGED")
                     continue
                 if not document["body_md"].strip():
                     continue
@@ -688,28 +696,59 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
                     if current_menus.get(group['arc_key'], {}).get('menu_fingerprint') != group['menu_fingerprint']:
                         continue
                 valid_groups.append(group)
+            for group in evidence_groups:
+                if group not in valid_groups:
+                    for key in group['ids']:
+                        delivery.observe('group', key, reason='GROUP_INVALIDATED')
         valid_expansions = {key for group in valid_groups for key in group['ids']}
         records = {key: record for key, record in records.items() if key in direct_ids or key in valid_expansions}
-        selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP))
-        if source_evidence.enabled():
+        if delivery.enabled():
+            selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP),
+                                      strict=True, direct=direct_ids)
+        else:
+            selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP))
+        if source_evidence.enabled() or delivery.enabled():
             # An explicit source-time history window gets coverage before ranking
             # topical excerpts. It remains bounded and labels partial coverage.
             if timed:
                 ids = list(dict.fromkeys([row['id'] for row in timed if row['id'] in records]+
-                                         [row['id'] for row in selected]))[:min(top_k, _RETURN_CAP)]
-                selected = [records[key] for key in ids]
+                                         [row['id'] for row in selected]))
+                if delivery.enabled():
+                    selected = bridges.select(records, ids, valid_groups, min(top_k, _RETURN_CAP),
+                                              strict=True, direct=direct_ids)
+                else:
+                    selected = [records[key] for key in ids[:min(top_k, _RETURN_CAP)]]
             with Reader(paths.database) as reader:
-                output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP, groups=valid_groups)
+                output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP, groups=valid_groups,
+                                                _allow_read=source_evidence.enabled(), direct=direct_ids)
+                carriers = getattr(output, "carriers", None)
+                proof_refs = {ref for _, targets in carriers.proofs for ref in targets} if isinstance(carriers, delivery.Carriers) else set()
                 # A model call can overlap an external source/material edit.
-                output = [row for row in output if candidates[row['id']]['kind'] != 'narrative' or
-                          narratives.readable_for_search(prepared, reader, row['id'], original_query, policy)]
+                visible = []
+                for row in output:
+                    if row['id'] in proof_refs and not carriers.validate(row['id']):
+                        delivery.observe('rejected', row['id'], reason='UNREADABLE_OR_CHANGED')
+                        continue
+                    if candidates[row['id']]['kind'] == 'narrative' and not narratives.readable_for_search(
+                            prepared, reader, row['id'], original_query, policy):
+                        delivery.observe('rejected', row['id'], reason='UNREADABLE')
+                        continue
+                    visible.append(row)
+                output = visible
+                if isinstance(carriers, delivery.Carriers):
+                    carriers.refresh(lambda ref: candidates[ref]['kind'] != 'narrative' or
+                                     narratives.readable_for_search(prepared, reader, ref, original_query, policy))
                 fresh_groups = []
                 for group in valid_groups:
                     if 'arc_key' in group:
                         _, current_menus = _arcs(reader, [], arc_key=group['arc_key'])
                         if current_menus.get(group['arc_key'], {}).get('menu_fingerprint') != group['menu_fingerprint']:
+                            for key in group['ids']:
+                                delivery.observe('group', key, reason='GROUP_INVALIDATED')
                             continue
                     fresh_groups.append(group)
+            if delivery.enabled():
+                return delivery.finish(output, fresh_groups, direct_ids, carriers)
             returned = {row['id']: row['content'] for row in output}
             accepted_expansions = {key for group in fresh_groups
                 if all(key in returned for key in group['ids'])
@@ -739,6 +778,15 @@ def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k:
             if content.strip():
                 output.append({**item, "content": content})
     return output
+
+
+def search_memory(*, query: str, options: list[str] | None, user_id: str, top_k: int) -> list[dict[str, Any]]:
+    with delivery.request():
+        result = _search_memory(query=query, options=options, user_id=user_id, top_k=top_k)
+        for row in result:
+            delivery.observe('final', row['id'], length=len(row['content']))
+        delivery.observe('final_count', count=len(result))
+        return result
 
 
 def api_key_matches(authorization: str | None, x_api_key: str | None) -> bool:

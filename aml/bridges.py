@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+from . import delivery
+
 from serein.core.store import digest
 from serein.tagging_entities import current_entities, entity_key, name_position, snapshot, validate
 
@@ -140,9 +142,13 @@ def matching_quote(plan, hit):
     return None
 
 
-def select(records, ordered, groups, limit):
+def select(records, ordered, groups, limit, *, strict=False, direct=()):
     """Reserve complete validated groups within the cap, then fill ordinary ranks."""
     chosen = []
+    grouped = {key for group in groups for key in group['ids']}
+    if strict and limit < 2:
+        for key in grouped:
+            delivery.observe('group', key, reason='TOP_K_GROUP')
     if limit >= 2:
         for group in sorted(groups, key=lambda row: row['route'] != 'arc_menu'):
             ids = list(dict.fromkeys(group['ids']))
@@ -151,10 +157,15 @@ def select(records, ordered, groups, limit):
             missing = [key for key in ids if key not in chosen]
             if len(chosen) + len(missing) <= limit:
                 chosen.extend(missing)
+            elif strict:
+                for key in missing:
+                    delivery.observe('group', key, reason='TOP_K_GROUP')
     for key in ordered:
         if len(chosen) >= limit:
             break
         if key in records and key not in chosen:
+            if strict and key in grouped and key not in direct:
+                continue
             chosen.append(key)
     return [records[key] for key in chosen]
 

@@ -13,6 +13,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from pydantic import BaseModel, Field, field_validator
 
 from .engine import AddConflict, SearchInputError, add_memory, api_key_matches, search_memory
+from .delivery import DeliveryError
 from .runtime import ProfileConflict
 
 
@@ -144,6 +145,9 @@ def search(
     except SearchInputError as exc:
         logger.warning("aml_search_validation reason=input_budget")
         raise HTTPException(status_code=422, detail={"reason": str(exc)}) from exc
+    except DeliveryError as exc:
+        logger.warning("aml_search_delivery reason=%s", exc.reason)
+        raise HTTPException(status_code=503, detail={"reason": exc.reason}) from None
     except Exception as exc:
         error_id = _log_search_failure(exc)
         raise HTTPException(status_code=500, detail={
