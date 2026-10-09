@@ -82,6 +82,10 @@ AML 使用明确问题的 lookup 路径。上图中的日常自动浮现、冷�
 
 文档导入版本单独记录在 [`upstream-serein.json`](../upstream-serein.json)，不改变其中固定的后端基线。仅复制已在公开仓库跟踪的阅读文件；不附带运行库、原始评测问题、私有研究包或模型凭据。
 
+## Router 续接说明长度
+
+简化比赛模式关闭编辑审查时，Router 的 throughline 保留完整文本并接受最多 2400 字符；提示仍要求尽量控制在 600 字符以内。公开默认编辑审查模式仍限制 600 字符。subject 仍为 1..160 字符，空字段、来源覆盖、Track 身份、bridge 及状态校验不变；超过简化上限仍失败，不做截断或自动改写。
+
 ## Curator 可写 root 编号
 
 简化 Curator 的新提示、示例、HOST_IDS 和重试纠正只使用真实可写 `unit_root_message_id` 整数，不另设连续 U 编号。列表仅包括完整冻结 stable unit，示例取实际首个可写 root；没有可写 unit 时不编造示例 root。非连续消息 ID 不需要重编号。

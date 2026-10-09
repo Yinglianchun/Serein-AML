@@ -60,7 +60,8 @@ needs one assignment in input order. Use the supplied T-labels for existing Trac
 context is read-only: do not assign it. For track_updates, include new Tracks and
 existing cards you actually change; unchanged existing cards are carried by host.
 Only update used Tracks. subject identifies the concrete activity (1..160 chars);
-throughline summarizes its current continuation (1..600 chars), not a broad history.
+throughline summarizes its current continuation, not a broad history. Aim for
+600 chars or fewer; the host accepts up to 2400 chars without truncation.
 Do not broaden an existing subject to absorb an unrelated activity. status is
 active or parked. event_policy is default unless ongoing implementation, repair
 or verification serves one concrete continuing deliverable: rolling_engineering.

@@ -4,6 +4,7 @@ See docs/public-feature-contracts.md for provenance and host differences.
 import re
 from datetime import datetime, timedelta
 from typing import Any
+from .pipeline_policy import router_throughline_limit
 TRACK_ROUTING_ROLES = {"origin", "primary_activity", "landing", "bridge", "routine"}
 TRACK_EVENT_POLICIES = {"default", "rolling_engineering"}
 
@@ -199,7 +200,8 @@ def normalize_event_track_message_output(
             track_ref not in existing and not re.fullmatch(r"new:[1-9][0-9]*", track_ref)
         ):
             raise ValueError("Track Router updated an invalid or repeated Track")
-        if not subject or len(subject) > 160 or not throughline or len(throughline) > 600:
+        throughline_limit = router_throughline_limit()
+        if not subject or len(subject) > 160 or not throughline or len(throughline) > throughline_limit:
             raise ValueError("Track Router update needs bounded subject and throughline")
         if status not in {"active", "parked"}:
             raise ValueError("Track Router update has invalid status")

@@ -271,9 +271,10 @@ def route_result(data,output):
 
 
 def _card_is_complete(card):
+    from .pipeline_policy import router_throughline_limit
     return (isinstance(card,dict) and isinstance(card.get('track_id'),str) and card['track_id']
             and all(isinstance(card.get(key),str) and 0<len(card[key].strip())<=limit
-                    for key,limit in (('subject',160),('throughline',600)))
+                    for key,limit in (('subject',160),('throughline',router_throughline_limit())))
             and card.get('status') in ('active','parked')
             and card.get('event_policy','default') in ('default','rolling_engineering'))
 
