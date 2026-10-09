@@ -1,5 +1,29 @@
 # AML delivery guards (opt-in)
 
+## Literal excerpts without model selection
+
+`SEREIN_AML_BALANCED_EXCERPTS=1` (default `0`) changes only final legacy
+excerpt delivery when both `SOURCE_EVIDENCE` and `DELIVERY_FIXES` are off.
+It keeps the existing per-record allocation and total character budget; short
+bodies remain unchanged. Reviewed literal focus quotes have priority. Remaining
+space covers the beginning, end, and a query-matching interior window, with the
+midpoint as fallback. Matching uses literal English words and Chinese bigrams,
+not model decisions, inferred causal relations, or current-state judgments.
+Windows are merged and returned in source order, separated by `[…]` where
+material was omitted. Gap marks count against the budget. An exact-sized focus
+quote reservation is returned verbatim when marks do not fit; a tiny slot with
+no focus may return nothing. Windows may contain partial sentences.
+
+This does not enable original-source reads, time recall, timeline construction,
+new candidate expansion, or another model call. It does not guarantee complete
+evidence, chronological order, privacy classification, or benchmark improvement.
+It prevents the default prefix-only bias, but literal matching can still miss
+relevant middle facts. When existing anonymous audit is enabled, truncated
+records emit `PARTIAL_EXCERPT` with a request-local reference and output length,
+never query or body content. No production flags are enabled by this code change.
+
+Focused checks: `python -m pytest tests_aml/test_balanced_excerpts.py tests_aml/test_bridge_retention.py tests_aml/test_delivery.py tests_aml/test_contract.py -q`.
+
 `SEREIN_AML_DELIVERY_FIXES=1` enables only the guarded delivery path. Its default is `0`, preserving the existing baseline. With `SEREIN_AML_SOURCE_EVIDENCE=0`, it selects bounded units from the existing candidate bodies; it does not add time candidates, request bound originals, normalize dates, or classify historical/current state. Existing pending-original candidates remain available through their existing recall route. Source bindings are still read locally for visibility/version checks, without sending extra originals to the selector.
 
 `SEREIN_AML_SOURCE_EVIDENCE=1` remains the separate older experimental package. Combining it with delivery guards also guards its existing source-selection path; it is not necessary for testing body delivery. The final selector enforces its existing UTF-8 input budget. Enabling delivery alone does not change query rewriting or relationship-review prompts, redaction, or their upstream input limits. No flags are enabled by this change.

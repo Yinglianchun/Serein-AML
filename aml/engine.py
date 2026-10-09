@@ -774,7 +774,12 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
             budget -= length
         for item in selected:
             focus = [quote for group in valid_groups for quote in group.get('focus', {}).get(item['id'], [])]
-            content = bridges.excerpt(item["content"], allowances[item["id"]], focus)
+            if os.getenv('SEREIN_AML_BALANCED_EXCERPTS', '0') == '1':
+                content = bridges.balanced_excerpt(item["content"], allowances[item["id"]], focus, query)
+                if len(item['content'].lstrip()) > allowances[item['id']]:
+                    delivery.observe('excerpt', item['id'], length=len(content), reason='PARTIAL_EXCERPT')
+            else:
+                content = bridges.excerpt(item["content"], allowances[item["id"]], focus)
             if content.strip():
                 output.append({**item, "content": content})
     return output

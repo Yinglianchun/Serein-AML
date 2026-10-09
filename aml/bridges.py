@@ -182,3 +182,75 @@ def excerpt(content, allowance, focus=()):
     start = max(0, position - max(0, allowance - len(quote)) // 4)
     start = min(start, len(content) - allowance)
     return content[start:start + allowance]
+
+
+def balanced_excerpt(content, allowance, focus=(), query=''):
+    """Literal bounded windows, with visible gaps; no new semantic claims.
+
+    Reviewed quotes take priority. Remaining space covers the beginning, end,
+    and query-matching interior (or midpoint). This is partial evidence, not a
+    summary or a guarantee that every relevant fact has been selected.
+    """
+    content = content.lstrip()
+    if allowance <= 0:
+        return ''
+    if len(content) <= allowance:
+        return content
+    gap = '\n[…]\n'
+    spans = []
+
+    def merged(items):
+        result = []
+        for start, end in sorted(items):
+            if result and start <= result[-1][1]:
+                result[-1] = (result[-1][0], max(end, result[-1][1]))
+            else:
+                result.append((start, end))
+        return result
+
+    def render(items):
+        items = merged(items)
+        if not items:
+            return ''
+        return ((gap if items[0][0] else '') +
+                gap.join(content[a:b] for a, b in items) +
+                (gap if items[-1][1] < len(content) else ''))
+
+    # Do not silently cut an explicitly reviewed quote into a different claim.
+    for quote in dict.fromkeys(focus):
+        position = content.find(quote) if quote else -1
+        if position >= 0:
+            proposed = merged([*spans, (position, position + len(quote))])
+            if len(render(proposed)) <= allowance:
+                spans = proposed
+            elif not spans and len(quote) <= allowance:
+                # A slot reserved for exactly this quote must still deliver it.
+                # There is no room for context or omission markers in that case.
+                return quote
+    if allowance <= 2 * len(gap):
+        return render(spans) if spans else ''
+
+    # Match literal words / Chinese bigrams, not inferred synonyms or answers.
+    terms = set(re.findall(r'[a-zA-Z0-9]{3,}', query.lower()))
+    for run in re.findall(r'[\u4e00-\u9fff]+', query):
+        terms.update(run[i:i+2] for i in range(len(run)-1))
+    middle = len(content) // 2
+    best = 0
+    for match in re.finditer(r'[^\n。！？.!?]+[。！？.!?]?', content):
+        if match.start() < len(content)//4 or match.end() > len(content)*3//4:
+            continue
+        score = sum(term in match.group().lower() for term in terms)
+        if score > best:
+            best, middle = score, (match.start()+match.end())//2
+
+    # Three allocations share the existing character budget, including gap marks.
+    for index, anchor in enumerate((0, len(content), middle)):
+        remaining = allowance - len(render(spans))
+        width = max(0, remaining // (3-index) - 2*len(gap))
+        if not width:
+            continue
+        start = max(0, min(len(content)-width, anchor-width//2))
+        proposed = merged([*spans, (start, start+width)])
+        if len(render(proposed)) <= allowance:
+            spans = proposed
+    return render(spans)
