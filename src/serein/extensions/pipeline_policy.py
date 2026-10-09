@@ -10,10 +10,6 @@ def editorial_review_enabled():
     return _editorial_review.get()
 
 
-def router_throughline_limit():
-    return 600 if editorial_review_enabled() else 2400
-
-
 @contextmanager
 def editorial_review_scope(enabled=True):
     token = _editorial_review.set(enabled)

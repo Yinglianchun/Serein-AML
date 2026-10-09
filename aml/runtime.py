@@ -60,8 +60,9 @@ needs one assignment in input order. Use the supplied T-labels for existing Trac
 context is read-only: do not assign it. For track_updates, include new Tracks and
 existing cards you actually change; unchanged existing cards are carried by host.
 Only update used Tracks. subject identifies the concrete activity (1..160 chars);
-throughline summarizes its current continuation, not a broad history. Aim for
-600 chars or fewer; the host accepts up to 2400 chars without truncation.
+throughline is a short continuation cue: concrete goal, current stage and next
+unresolved step. Aim for 300 characters; maximum 600 characters. Replace the
+previous cue with the current state instead of appending a running history.
 Do not broaden an existing subject to absorb an unrelated activity. status is
 active or parked. event_policy is default unless ongoing implementation, repair
 or verification serves one concrete continuing deliverable: rolling_engineering.
@@ -693,6 +694,17 @@ HOST_IDS:
                                'choose its non-bridge role when it stays on one Track, or identify '
                                'the genuinely different Track if it connects two activities. '
                                'Never repeat primary in context or invent a relation to satisfy validation.')
+            if role == 'track_router' and 'bounded subject and throughline' in str(error):
+                lengths = [{'update_index': i,
+                            'subject_chars': len(' '.join(str(row.get('subject') or '').split())),
+                            'throughline_chars': len(' '.join(str(row.get('throughline') or '').split()))}
+                           for i, row in enumerate(output.get('track_updates', [])) if isinstance(row, dict)]
+                correction += ('\nCard character counts: ' + encode(lengths)
+                               + '\nsubject must be nonempty and at most 160 characters. throughline must be '
+                                 'nonempty and at most 600 characters; aim below 300. Replace a long history '
+                                 'with its concrete goal, current stage and unresolved next step. '
+                                 'Keep message assignments, Track references, status and event_policy unchanged. '
+                                 'Do not remove or reassign source messages to shorten a card.')
             room = maximum - len(rules) - len(base_prompt) - len(reminder) - len(correction) - 80
             if room < 0:raise
             prompt = base_prompt + reminder + correction + '\nPrevious invalid output:\n' + raw[:min(room,10000)]
