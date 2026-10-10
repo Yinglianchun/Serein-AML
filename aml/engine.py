@@ -552,6 +552,7 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                 pending_reads = []
                 for choice in choices:
                     key, picks = choice["arc_key"], choice["picks"]
+                    delivery.observe('arc_picks', count=len(picks))
                     try:
                         page = services.arc_picks(key, picks, with_evidence=True)
                     except ValueError:
@@ -581,7 +582,6 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                     reads, eligible = [], {}
                     policy = RecallPolicy.from_config(prepared.recall)
                     original_query = Query(query, mode="lookup", intent="direct")
-                    allowance = 8000 // len(pending_reads)
                     with Reader(paths.database) as reader:
                         for index, item in enumerate(pending_reads):
                             hit, anchor = item["hit"], item["group"]["ids"][0]
@@ -604,9 +604,8 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                                     continue
                                 title, body = doc["title"], doc["body_md"]
                             anchor_view = anchor_evidence[0]
-                            focus = item["group"].get("plan", {}).get("anchor_quote")
-                            anchor_text = bridges.excerpt(anchor_view["text"], allowance // 3, [focus] if focus else [])
-                            text = bridges.excerpt(body, allowance-len(anchor_text), [])
+                            anchor_text = anchor_view['text']
+                            text = body
                             if not anchor_text.strip() or not text.strip():
                                 continue
                             selection = f"s{index}"
@@ -620,6 +619,7 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                         accepted = arc_planning.review(_model_json, query, options, evidence, reads)
                     except (json.JSONDecodeError, ValueError):
                         accepted = {}
+                    delivery.observe('arc_review', count=len(accepted))
                     for selection, support in accepted.items():
                         item = eligible[selection]
                         group = item["group"]

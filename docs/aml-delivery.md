@@ -1,5 +1,34 @@
 # AML delivery guards (opt-in)
 
+## Existing Narrative read path
+
+Narrative authoring, Arc menu selection (index 0 for authored prose), joint
+review, and final Search delivery already support dated stages and causal prose.
+`tests_aml/test_narrative_history_delivery.py` exercises that chain with a
+synthetically authored volume and real storage/reader/Search code; model
+decisions are fixtures, not real-mini acceptance or a benchmark reproduction.
+
+Final excerpt diagnostics alone do not cover earlier clipping. Previously the
+joint-review stage shared 8000 characters among pending reads, including anchor
+text; a synthetic long volume lost its later causal facts before review.
+That shared character cap is now removed. Selected material bodies remain whole
+and are greedily packed into review calls bounded by SEARCH_INPUT_BYTES (default
+24000 UTF-8 bytes), including instructions, question, options, current evidence,
+anchors and JSON overhead. Multiple materials may require multiple calls. A
+single material that cannot fit is skipped with INPUT_BUDGET, not silently cut;
+other fitting materials can still be reviewed. No retry or source reread is
+added. The initial planning-evidence 8000-character cap and final output cap
+are unchanged. Tests verify that a formerly truncated volume's later facts reach
+both review and final Search. This is not proof of a benchmark improvement.
+
+With DELIVERY_AUDIT enabled, `arc_picks` records the number of menu choices,
+`arc_read` records offered body length, `arc_read_rejected` records INPUT_BUDGET,
+and `arc_review` records the accepted count. References remain random and
+request-local; no titles, queries, bodies or model responses are logged. A zero
+accepted count does not distinguish semantic rejection from invalid model
+format. Tests use synthetic model decisions and do not establish real-mini
+semantic acceptance.
+
 ## Literal excerpts without model selection
 
 `SEREIN_AML_BALANCED_EXCERPTS=1` (default `0`) changes only final legacy

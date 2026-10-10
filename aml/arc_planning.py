@@ -5,6 +5,8 @@ import json
 import re
 
 from .evidence import enabled as numbered_enabled
+from .evidence import input_limit
+from . import delivery
 
 
 def units(text):
@@ -166,13 +168,48 @@ def exact(quote, text):
 
 
 def review(model, query, options, evidence, reads):
+    """Pack whole selected materials into bounded requests, never equal slices."""
+    accepted, batch = {}, []
+
+    def fits(items):
+        prompt = _review_batch(model, query, options, evidence, items, prompt_only=True)
+        return len(prompt.encode('utf-8')) <= input_limit()
+
+    def submit(items):
+        try:
+            result = _review_batch(model, query, options, evidence, items)
+        except (json.JSONDecodeError, ValueError):
+            result = {}
+        for item in items:
+            delivery.observe('arc_read', item['material']['ref'], length=len(item['material']['text']))
+        accepted.update(result)
+
+    for item in reads:
+        if fits([*batch, item]):
+            batch.append(item)
+            continue
+        if batch:
+            submit(batch)
+            batch = []
+        if fits([item]):
+            batch = [item]
+        else:
+            delivery.observe('arc_read_rejected', item['material']['ref'], reason='INPUT_BUDGET')
+    if batch:
+        submit(batch)
+    return accepted
+
+
+def _review_batch(model, query, options, evidence, reads, *, prompt_only=False):
     if not reads:
         return {}
     use_numbers = numbered_enabled()
     visible_reads, visible_evidence = reads, evidence
     support_rule = '''For each accepted selection cite exact visible quotes from BOTH the supplied
 anchor and material. When bridge_entity is present, both quotes must contain
-that exact entity name.'''
+that exact entity name. Copy anchor_quote ONLY from that selection's anchor.text;
+copy quote ONLY from that selection's material.text. A material sentence cannot
+be used as anchor_quote, even when it mentions the same person or event.'''
     example = '{"selection":"s0","anchor_quote":"exact quote","quote":"exact quote"}'
     if use_numbers:
         visible_reads = [{**item, 'anchor': numbered(item['anchor']), 'material': numbered(item['material'])} for item in reads]
@@ -203,6 +240,8 @@ CURRENT_EVIDENCE:
 READS:
 {json.dumps(visible_reads, ensure_ascii=False)}
 """
+    if prompt_only:
+        return prompt
     result = model(prompt)
     if not isinstance(result, dict):
         return {}
