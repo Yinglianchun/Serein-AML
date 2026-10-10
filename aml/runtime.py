@@ -142,6 +142,12 @@ def writer_payload(request):
         prefix, marker, sources = prompt.partition('<event_curator_input_json>')
         if marker:
             writable_roots = list(curator_unit_choices(request['component']).values())
+            payload = sources.lstrip()
+            visible, offset = json.JSONDecoder().raw_decode(payload)
+            # Keep all original material, with current dialogue units after history.
+            current = visible.pop('units')
+            visible['units'] = current
+            sources = json.dumps(visible, ensure_ascii=False) + payload[offset:]
             example = {'events': ([{'action': 'create', 'base_event_ids': [],
                                    'primary_track_id': 'actual track ID', 'owned_unit_roots': writable_roots[:1]}]
                                  if writable_roots else []), 'skip_unit_roots': [], 'defer_unit_roots': []}
@@ -171,7 +177,10 @@ def writer_payload(request):
                       'For essential missing context, use only the original bounded context_request schema: '
                       + context_example + '\nHost Event scope: ' + encode(curator_event_scope(request['component']))
                       + '\nWritable stable unit roots: ' + encode(writable_roots)
-                      + '\n' + marker + sources)
+                      + '\n' + marker + sources
+                      + '\nCURRENT TASK: Decide only units marked stable in units above. '
+                        'History and old Event source IDs are read-only. '
+                        'Allowed owned/skip/defer roots: ' + encode(writable_roots))
     if simplified_authoring() and request['role'] == 'event_writer' and not request.get('transcription_only'):
         prefix, marker, sources = prompt.partition('<event_reading_block_json>')
         if marker:
@@ -707,7 +716,7 @@ HOST_IDS:
                                  'Do not remove or reassign source messages to shorten a card.')
             room = maximum - len(rules) - len(base_prompt) - len(reminder) - len(correction) - 80
             if room < 0:raise
-            prompt = base_prompt + reminder + correction + '\nPrevious invalid output:\n' + raw[:min(room,10000)]
+            prompt = base_prompt + reminder + '\nPrevious invalid output (rejected, not an example):\n' + raw[:min(room,10000)] + correction
     raise RuntimeError('Public stage validation did not complete')
 
 

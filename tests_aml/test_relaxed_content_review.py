@@ -39,7 +39,8 @@ def test_editorial_failures_do_not_buy_rewrites_or_fake_reviews(memory, monkeypa
         if role == 'event_curator':
             assert 'No decision_review' in payload['messages'][0]['content']
             marker = '<event_curator_input_json>'
-            assert payload['messages'][1]['content'].split(marker)[1].split('</event_curator_input_json>')[0] == request['prompt'].split(marker)[1].split('</event_curator_input_json>')[0]
+            decode = lambda text: json.JSONDecoder().raw_decode(text.split(marker, 1)[1].lstrip())[0]
+            assert decode(payload['messages'][1]['content']) == decode(request['prompt'])
             if variant == 'round_and_material_gate':
                 assert request['component']['writer_round_gate']
                 assert request['component']['writer_material_review']

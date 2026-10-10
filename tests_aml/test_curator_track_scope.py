@@ -42,7 +42,8 @@ def test_payload_distinguishes_allowed_tracks_from_foreign_stable_bridges(monkey
                          {'root': 2, 'primary_track_id': 'move', 'context_track_ids': ['visit']}]}
     assert 'do not create a separate Event for its external Track' in prompt
     marker = '<event_curator_input_json>'
-    assert prompt.partition(marker)[2] == request['prompt'].partition(marker)[2]
+    decode = lambda text: json.JSONDecoder().raw_decode(text.partition(marker)[2].lstrip())[0]
+    assert decode(prompt) == decode(request['prompt'])
     assert request == frozen
     monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '0')
     assert runtime.writer_payload(request) == (request['rules'], request['prompt'])

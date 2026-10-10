@@ -177,3 +177,17 @@ def test_host_ids_and_retry_correction_use_only_real_roots(memory,monkeypatch):
  monkeypatch.setattr(runtime,'run_stage',observed)
  monkeypatch.setattr('serein.model_runtime.complete',complete)
  assert add() and len(prompts)==2
+
+
+def test_current_units_follow_history_without_changing_payload(monkeypatch):
+ import json
+ monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING','1')
+ monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW','1')
+ request=numbered_request([83,84])
+ frozen=copy.deepcopy(request)
+ before=json.JSONDecoder().raw_decode(request['prompt'].split('<event_curator_input_json>',1)[1].lstrip())[0]
+ _,prompt=runtime.writer_payload(request)
+ after=json.JSONDecoder().raw_decode(prompt.split('<event_curator_input_json>',1)[1].lstrip())[0]
+ assert after==before and list(after)[-1]=='units'
+ assert prompt.endswith('Allowed owned/skip/defer roots: [83,84]')
+ assert request==frozen
