@@ -528,6 +528,8 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                     if metadata.get("legacy_registry", metadata).get("publication_status") == "collecting":
                         menu["materials"] = [item for item in menu["materials"] if item["index"] != 0]
             menus = dict(list(menus.items())[:3])
+            delivery.observe('arc_menus', count=len(menus))
+            delivery.observe('arc_menu_items', count=sum(len(m['materials']) for m in menus.values()))
             if menus or _EXPAND_GAPS:
                 evidence = []
                 gap_searches = []
@@ -556,10 +558,12 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                     try:
                         page = services.arc_picks(key, picks, with_evidence=True)
                     except ValueError:
+                        delivery.observe('arc_read_failed', reason='UNREADABLE_OR_CHANGED')
                         # Selections may have disappeared while the model was choosing.
                         continue
                     # Never return changed materials as the original menu selection.
                     if page.get("menu_fingerprint") != menus[key]["menu_fingerprint"]:
+                        delivery.observe('arc_read_failed', reason='SOURCE_CHANGED')
                         continue
                     hits = [{"id": item["id"], "kind": item["kind"],
                              "object": item["object"], "document": item["object"]["document"]}
@@ -574,6 +578,7 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                             evidence_groups.append(group)
                 if gap_searches:
                     candidate = _gap_candidate(services, prepared, query, gap_searches, candidates)
+                    delivery.observe('arc_gap_candidates', count=int(candidate is not None))
                     if candidate:
                         pending_reads.append(candidate)
                 if planning and pending_reads:

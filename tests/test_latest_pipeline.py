@@ -117,8 +117,8 @@ def test_repeated_curator_omission_pauses_on_third_round_and_retry_can_correct(s
     clock = datetime(2026, 1, 1, 12, tzinfo=p.TZ)
     monkeypatch.setattr(p, 'now', lambda: clock.isoformat())
     new_batch = p.new_batch
-    monkeypatch.setattr(p, 'new_batch', lambda database, include_recent:
-                        new_batch(database, include_recent, clock=clock))
+    monkeypatch.setattr(p, 'new_batch', lambda database, include_recent, **kwargs:
+                        new_batch(database, include_recent, clock=clock, **kwargs))
     for _ in range(2):
         retained = asyncio.run(p.advance(settings.database, include_recent=True, runner=runner))
         assert retained['status'] == 'processed' and retained['events'] == 0
@@ -625,7 +625,7 @@ def test_image_transcription_defaults_only_deterministic_unreadable_flag():
     assert blank[0]['unreadable'] is True
 
 
-def test_runtime_revision_retires_all_unfinished_frozen_statuses(settings):
+def test_runtime_revision_holds_unfinished_and_preserves_route_evidence(settings):
     p.initialize(settings.database)
     stale={'contract':p.CONTRACT,'runtime_revision':'stale','routing_messages':[]}
     with Store(settings.database) as store:
@@ -638,9 +638,9 @@ def test_runtime_revision_retires_all_unfinished_frozen_statuses(settings):
     p.initialize(settings.database)
     with Store(settings.database,read_only=True) as store:
         rows=store.conn.execute("SELECT status FROM pipeline_batches WHERE id LIKE 'stale-%' ORDER BY id").fetchall()
-        assert store.conn.execute('SELECT count(*) FROM pipeline_routes WHERE raw_id=999').fetchone()[0]==0
-        assert store.conn.execute('SELECT count(*) FROM pipeline_route_provenance WHERE raw_id=999').fetchone()[0]==0
-    assert [row['status'] for row in rows]==['superseded_protocol']*4
+        assert store.conn.execute('SELECT count(*) FROM pipeline_routes WHERE raw_id=999').fetchone()[0]==1
+        assert store.conn.execute('SELECT count(*) FROM pipeline_route_provenance WHERE raw_id=999').fetchone()[0]==1
+    assert [row['status'] for row in rows]==['needs_repair','needs_repair','needs_repair','routed']
 
 def test_transcribe_component_prefers_frozen_exact_receipt(settings,monkeypatch):
     import hashlib

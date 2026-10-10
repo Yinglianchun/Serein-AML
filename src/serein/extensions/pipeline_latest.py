@@ -63,9 +63,20 @@ def parse_datetime(value: Any) -> datetime | None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
 
+def source_time_fields(item: dict[str, Any], *, writer: bool=False) -> dict[str, Any]:
+    """Keep AML receipt time out of historical message timestamps."""
+    origin = (item.get('metadata') or {}).get('aml_time_origin')
+    stamp = item.get('created_at')
+    if origin == 'ingestion':
+        return {'created_at': None, 'message_time_origin': 'unknown'}
+    if origin == 'source':
+        return {'created_at': stamp, 'message_time_origin': 'source'}
+    return {'created_at': writer_source_time(stamp) if writer else stamp}
+
+
 def transcript_payload(messages: list[dict[str, Any]], snowflake_message_ids: set[int] | None=None) -> list[dict[str, Any]]:
     saved_ids = snowflake_message_ids or set()
-    return [{'message_id': int(item['id']), 'created_at': item.get('created_at'), 'speaker': _identity_text('{user_name}') if item.get('role') == 'user' else _identity_text('{ai_name}'), 'text': str(item.get('content') or ''), 'saved_snowflake': int(item['id']) in saved_ids, 'memory_event_source': bool((item.get('metadata') or {}).get('memory_event_source')), 'attachment_refs': attachment_references(item)} for item in messages]
+    return [{'message_id': int(item['id']), **source_time_fields(item), 'speaker': _identity_text('{user_name}') if item.get('role') == 'user' else _identity_text('{ai_name}'), 'text': str(item.get('content') or ''), 'saved_snowflake': int(item['id']) in saved_ids, 'memory_event_source': bool((item.get('metadata') or {}).get('memory_event_source')), 'attachment_refs': attachment_references(item)} for item in messages]
 
 
 def writer_source_time(value: Any) -> Any:
@@ -136,7 +147,7 @@ def event_curator_model_input(component: dict[str, Any], snowflake_message_ids: 
         covered_source_ids.update(source_set)
         unit_messages = sorted((context_by_id[source_id] for source_id in source_ids), key=lambda item: (parse_datetime(item.get('created_at')), int(item['id'])))
         units.append({'root': root, 'scope': scope, 'primary_track': str(membership.get('track_id') or ''), 'context_tracks': edge_tracks.get(root, []), 'messages': event_track_message_payload(unit_messages, snowflake_message_ids)})
-    units.sort(key=lambda item: (parse_datetime(item['messages'][0].get('created_at')), int(item['messages'][0]['source_message_id'])))
+    units.sort(key=lambda item: (parse_datetime(context_by_id[int(item['messages'][0]['source_message_id'])].get('created_at')), int(item['messages'][0]['source_message_id'])))
     if not stable_ids.union(parked_ids).issubset(covered_source_ids):
         raise ValueError('Track Curator settlement sources lack an atomic unit')
     base_events: list[dict[str, Any]] = []
@@ -665,7 +676,7 @@ def attachment_references(message: dict[str, Any]) -> list[dict[str, Any]]:
     return references
 
 def writer_transcript_payload(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{'message_id': int(item['id']), 'created_at': writer_source_time(item.get('created_at')), 'speaker': '她' if item.get('role') == 'user' else '我', 'text': str(item.get('content') or ''), 'saved_snowflake': False, 'memory_event_source': bool((item.get('metadata') or {}).get('memory_event_source')), 'attachment_refs': attachment_references(item)} for item in messages]
+    return [{'message_id': int(item['id']), **source_time_fields(item, writer=True), 'speaker': '她' if item.get('role') == 'user' else '我', 'text': str(item.get('content') or ''), 'saved_snowflake': False, 'memory_event_source': bool((item.get('metadata') or {}).get('memory_event_source')), 'attachment_refs': attachment_references(item)} for item in messages]
 
 def event_reading_block_payload(messages: list[dict[str, Any]], context_messages: list[dict[str, Any]] | None, source_activity_roles: dict[int, str] | None=None) -> list[dict[str, Any]]:
     owned_ids = {int(item['id']) for item in messages}

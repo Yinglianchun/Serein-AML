@@ -79,3 +79,76 @@ A later offline-only program fix adds the strictly scoped shared projection desc
 A subsequent fresh 7-call mini batch passed on the latest shared-carrier code through the real engine body path (no _read_refs/source requests), including two controlled reviewed-focus shared chains, cross-Event, top-k, output budget, no-match and minimum disclosure. The shared cases selected both records and returned one carrier with both required facts; mini did not naturally emit b-only in this batch. The b-only behavior remains supported by the separate saved-output offline replay, and missing-fact/no-focus refusal by zero-call fixtures, not additional natural model samples. Review focus and recall/source binding were controlled synthetic fixtures, not a relation-model or end-to-end retrieval acceptance. Actual HTTP JSON was bounded at 24000 UTF-8 bytes with test-only max_tokens=1800. This batch did not deploy anything or establish score improvement.
 
 Focused regression: `python -m pytest tests_aml/test_delivery.py tests_aml/test_shared_delivery.py tests_aml/test_source_evidence.py tests_aml/test_bridge_retention.py tests_aml/test_entity_bridge.py tests_aml/test_contract.py -q`.
+
+
+## Planning diagnostics and source-time provenance
+
+With DELIVERY_AUDIT enabled, arc_menus and arc_menu_items count available menus.
+arc_plan_input counts evidence records and prompt UTF-8 bytes. arc_plan_sufficient
+means a structurally accepted sufficient decision, not independently verified semantic
+sufficiency. arc_plan_invalid marks invalid returned structure/quotes;
+arc_plan_model_error covers exceptions from the model adapter (including parsing).
+arc_plan_no_evidence and arc_plan_no_selection distinguish absent input from no
+accepted additional selection. arc_plan_rejected_choices counts fully rejected
+selection entries; arc_gap_queries and arc_gap_candidates count accepted queries
+and discovered candidates. arc_read_failed carries only a fixed reason code.
+No query, option, source text or raw model output is logged.
+
+The existing planner prefers relevant authored prose for unresolved chronology,
+causality, state changes and period summaries, but stops when the supplied evidence
+already supports all requested facts. The incomplete JSON example now includes
+string-valued missing entries; numbers and objects are still rejected.
+
+AML originals keep their stored receipt timestamp for operational ordering. When
+aml_time_origin=ingestion, model-facing source projections expose created_at=null
+and message_time_origin=unknown. Explicit source timestamps retain their stored offset (AML epoch inputs are UTC),
+without the ordinary public writer Shanghai-time conversion;
+ordinary non-AML projections are unchanged. Writer input includes deterministic
+relative_date_notes for supported literal date expressions only. These are calendar
+hints anchored to the message date, not proof that a quoted or hypothetical event
+occurred then. Known explicit dates remain primary. Missing-clock relative prose
+can receive a neutral unknown-date note, without cropping an authored body or
+exceeding 1500 characters. Existing memories are not rewritten.
+
+Supported hints include yesterday/today/tomorrow, Chinese weekday offsets,
+English last/this/next weekday, numeric English days/weeks/months ago, and numeric
+or one/two-month Chinese offsets. English last weekday means the previous occurrence;
+Chinese 上周 uses the previous calendar week. Month shifts clamp to month end.
+This does not implement arbitrary relative expressions, cross-Event chronology,
+interval answers, query-time current dates, or historical-memory repair.
+
+Optional unknown-date notes also respect append_remaining_chars. If no room remains,
+the body is kept intact. Unparseable optional provenance packets are left to the
+existing pipeline validation; transcription-only requests retain their original rules.
+
+## Frozen pipeline holds (AML adaptation, 2026-10-11)
+
+Adapted the frozen-state portion of public Serein PR #64 (d5f2ce0), without
+importing its daytime routing, watermark partitioning or material snapshot changes.
+The competition Add adapter still advances synchronously with include_recent=True.
+
+- Runtime upgrades preserve frozen input, completed output, route provenance and
+  failure ledgers. Stale pending tasks become needs_repair; already paused tasks
+  remain paused. Explicit import boundaries retain their existing invalidation.
+- Same-scope queued work cannot bypass an earlier unfinished task. Independent
+  runnable scopes may settle before advance reports the remaining holds.
+- Changing input budget cannot re-batch a task with recorded stage failures.
+  Existing synchronous three-failure pause remains; no automatic reset is added.
+- AML treats blocked, needs_repair, retry_wait and routing_only as unfinished,
+  preserves the Add receipt as pending, and does not busy-loop or acknowledge success.
+  This adapter recognizes retry_wait; it does not introduce a new timed retry worker.
+- Same-version pauses use explicit retry. Changed-runtime pauses require explicit
+  confirmed rebuild; the original plan, outputs and failure history remain retained.
+  Existing source/settlement checks still gate rebuild. Contract-schema changes
+  remain rejected. Source content is never altered by recovery.
+
+Deployment must account for unfinished scopes before activation: changed-runtime
+work will intentionally hold for reviewed recovery. Retained old route caches are
+not automatically trusted; existing frozen-contract validation still applies.
+This prevents silent rerouting but does not make every old plan resumable unchanged.
+No live state migration, deployment or official evaluation was performed.
+
+Validation: full AML plus public route-history/latest-pipeline regressions: 576 passed.
+Final frozen-scope test file: 24 passed (overlapping, including two additional boundary
+cases added after the combined run collected tests). Diff and compile checks passed.
+All fixtures used temporary synthetic databases; no external model calls.

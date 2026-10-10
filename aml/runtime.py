@@ -85,6 +85,8 @@ def neutral_writer_sources(sources):
     block = sources.lstrip()
     rows, end = json.JSONDecoder().raw_decode(block)
     labels = {'\u5979': 'user', '\u6211': 'assistant'}
+    from .message_time import annotate
+    rows = annotate(rows)
     for row in rows:
         if row.get('speaker') in labels:
             row['speaker'] = labels[row['speaker']]
@@ -188,6 +190,14 @@ def writer_payload(request):
             sources = neutral_writer_sources(sources)
             prompt = ('\n'.join(prefix.splitlines()[:3]) + '\nIdentity: ' + encode(request['identity'])
                       + '\nReturn only evidence_sufficient, title and event_draft.\n' + marker + sources)
+    if (relaxed_content_review() and request['role'] == 'event_writer'
+            and not request.get('transcription_only')):
+        rules += (' Message created_at is a message timestamp, not necessarily an event date. '
+                  'A null timestamp means the historical message time is unknown; never use '
+                  'the processing date or prompt heading date to resolve relative dates. '
+                  'Preserve explicit event dates. Use supplied relative_date_notes for resolved dates; '
+                  'do not calculate dates yourself. When unresolved, retain the expression and explicitly write '
+                  '"exact date unknown" beside it in the memory body.')
     return rules, prompt
 
 
@@ -197,6 +207,26 @@ def prepare_writer_output(request, output):
             and not request.get('transcription_only') and isinstance(output, dict)
             and output.get('context_request') is None):
         output = dict(output)
+        from .message_time import RELATIVE
+        block = request.get('prompt', '').partition('<event_reading_block_json>')[2]
+        if block:
+            try:
+                rows, _ = json.JSONDecoder().raw_decode(block.lstrip())
+            except ValueError:
+                rows = []  # Optional provenance must not replace normal validation.
+            if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+                rows = []
+            owned = [row for row in rows if row.get('evidence_role') != 'context_only']
+            body = output.get('event_draft')
+            if (owned and all(row.get('message_time_origin') == 'unknown' for row in owned)
+                    and isinstance(body, str) and RELATIVE.search(body)):
+                note = ' [Exact date unknown: source message time unavailable.]'
+                limit = 1500
+                remaining = request.get('append_remaining_chars')
+                if request.get('writer_mode') == 'append' and type(remaining) is int:
+                    limit = min(limit, remaining)
+                if 'exact date unknown' not in body.lower() and len(body.rstrip()) + len(note) <= limit:
+                    output['event_draft'] = body.rstrip() + note
         for field in ('claim_groups', 'sentence_evidence'):
             output.pop(field, None)
         for field, value in (('kept_details', []), ('discarded_details', []), ('self_review', {})):
@@ -528,7 +558,7 @@ def only_protected_tails_pending(database, result):
         return False
     with Store(database, read_only=True) as store:
         if store.conn.execute("SELECT 1 FROM pipeline_batches WHERE status IN "
-                              "('pending','needs_repair','paused_failure') LIMIT 1").fetchone():
+                              "('pending','needs_repair','paused_failure','retry_wait','routing_only') LIMIT 1").fetchone():
             return False
         rows = list(store.conn.execute('SELECT r.* FROM raw_events r WHERE NOT EXISTS '
                                        '(SELECT 1 FROM raw_processing p WHERE p.raw_id=r.id) ORDER BY r.id'))
@@ -558,7 +588,7 @@ async def ingest_pipeline(settings):
         results.append(result)
         if result["status"] == "current":
             with Store(settings.database, read_only=True) as store:
-                blocked = store.conn.execute("SELECT 1 FROM pipeline_batches WHERE status IN ('paused_failure','needs_repair','pending') LIMIT 1").fetchone()
+                blocked = store.conn.execute("SELECT 1 FROM pipeline_batches WHERE status IN ('paused_failure','needs_repair','pending','retry_wait','routing_only') LIMIT 1").fetchone()
             if blocked:
                 raise RuntimeError("Public Event pipeline has an unfinished or paused batch")
             return results
@@ -569,10 +599,14 @@ async def ingest_pipeline(settings):
                 raise RuntimeError("Public Event pipeline repeated a paused batch")
             seen.add(result["batch_id"])
             continue
+        if result["status"] in ("blocked", "needs_repair", "retry_wait", "routing_only"):
+            # advance drains runnable independent scopes before reporting holds.
+            # Never acknowledge Add or retry a held task in a busy loop.
+            raise RuntimeError("Public Event pipeline has an unfinished or paused batch: " + result["status"])
         if result["status"] != "processed":
             raise RuntimeError("Public Event pipeline did not settle: " + result["status"])
         if result["batch_id"] in seen:
-            return results
+            raise RuntimeError("Public Event pipeline repeated a processed batch")
         seen.add(result["batch_id"])
         if relaxed_content_review() and only_protected_tails_pending(settings.database, result):
             # The host accepted this batch while preserving a protected old

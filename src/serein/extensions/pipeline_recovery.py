@@ -246,9 +246,11 @@ def _rebuild(database, batch_id):
     with Store(database) as store, store.transaction(immediate=True):
         batch = store.conn.execute('SELECT rowid AS queue_order,* FROM pipeline_batches WHERE id=?',
                                    (batch_id,)).fetchone()
-        if batch is None or batch['status'] != 'needs_repair':
+        if batch is None or batch['status'] not in ('needs_repair', 'paused_failure'):
             raise Conflict('此批已不处于待修复状态，请刷新后确认')
         data = json.loads(batch['input_json'])
+        if batch['status'] == 'paused_failure' and data.get('runtime_revision') == p.runtime_revision():
+            raise Conflict('同版本暂停批次应显式重试，不通过重建绕过失败预算')
         if data.get('contract') != p.CONTRACT:
             raise Conflict('旧批次契约不兼容，不能自动重建')
         stable = [m['id'] for m in data['messages']]
