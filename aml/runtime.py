@@ -396,7 +396,72 @@ def prepare_router_output(request, output):
             updates.append({'track_ref': ref, **{key: card[key] for key in
                 ('subject', 'throughline', 'event_policy', 'status') if key in card}})
             updated.add(ref)
+    messages = request.get('messages', [])
+    expected = [row['id'] for row in messages]
+    rows = output['message_assignments']
+    ids = [row.get('source_message_id') if isinstance(row, dict) else None for row in rows]
+    if (expected and all(type(value) is int for value in ids)
+            and len(ids) == len(set(ids)) and set(ids) == set(expected)):
+        by_id = dict(zip(ids, rows))
+        output['message_assignments'] = [by_id[value] for value in expected]
     return output
+
+
+def router_missing_ids(request, output):
+    """Offer a patch only when all retained routes pass the ordinary validator."""
+    if not simplified_authoring() or request['role'] != 'track_router' or not isinstance(output, dict):
+        return None
+    rows = output.get('message_assignments')
+    if not isinstance(rows, list):
+        return None
+    expected = [row['id'] for row in request['messages']]
+    ids = [row.get('source_message_id') if isinstance(row, dict) else None for row in rows]
+    if (not ids or not all(type(value) is int for value in ids)
+            or len(ids) != len(set(ids)) or not set(ids).issubset(expected)):
+        return None
+    missing = [value for value in expected if value not in ids]
+    if not missing:
+        return None
+    subset = copy.deepcopy(output)
+    by_id = dict(zip(ids, subset['message_assignments']))
+    messages = [row for row in request['messages'] if row['id'] in by_id]
+    subset['message_assignments'] = [by_id[row['id']] for row in messages]
+    try:
+        from serein.extensions.pipeline_rules import normalize_event_track_message_output
+        normalize_event_track_message_output(subset, messages, request.get('active_tracks', []),
+                                             session_id=0, next_track_ordinal=1)
+    except ValueError:
+        return None
+    return missing
+
+
+def merge_router_patch(request, retained, patch):
+    """Keep accepted rows immutable; a model may only supply still-missing routes."""
+    missing = router_missing_ids(request, retained)
+    if not missing or not isinstance(patch, dict):
+        raise ValueError('Track Router missing-message patch is invalid')
+    rows, updates = patch.get('message_assignments'), patch.get('track_updates')
+    if not isinstance(rows, list) or not isinstance(updates, list):
+        raise ValueError('Track Router patch requires message_assignments and track_updates')
+    ids = [row.get('source_message_id') if isinstance(row, dict) else None for row in rows]
+    if (not ids or not all(type(value) is int for value in ids)
+            or len(ids) != len(set(ids)) or not set(ids).issubset(missing)):
+        raise ValueError('Track Router patch must only assign missing source_message_ids=' + encode(missing))
+    merged = copy.deepcopy(retained)
+    cards = {row['track_ref']: row for row in merged['track_updates']}
+    seen = set()
+    for row in updates:
+        ref = row.get('track_ref') if isinstance(row, dict) else None
+        if not isinstance(ref, str) or ref in seen:
+            raise ValueError('Track Router patch has invalid or repeated Track update')
+        seen.add(ref)
+        if ref in cards:
+            if row != cards[ref]:
+                raise ValueError('Track Router patch cannot change retained Track cards')
+        else:
+            merged['track_updates'].append(copy.deepcopy(row))
+    merged['message_assignments'].extend(copy.deepcopy(rows))
+    return prepare_router_output(request, merged)
 
 
 def record_router_normalization(database, job_id, original, normalized):
@@ -686,9 +751,12 @@ HOST_IDS:
         raise ValueError('AML stage validation retry budget exhausted; use public batch retry after repair')
     # The host owns durable jobs and settlement. Archive the exact reply; only
     # normalize its representation before enforcing the selected host policy.
+    retained_router = None
     for attempt in range(attempts):
         raw = ''
         received = False
+        merged_router = False
+        output = None
         try:
             response = await asyncio.wait_for(complete({**model, 'request_timeout_seconds':timeout}, {
                 'messages':[{'role':'system','content':rules}, {'role':'user','content':prompt}],
@@ -698,6 +766,9 @@ HOST_IDS:
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
             router_original = output
             output = prepare_router_output(request, output)
+            if retained_router is not None:
+                output = merge_router_patch(request, retained_router, output)
+                merged_router = True
             curator_original = output
             output = prepare_curator_output(request, output)
             output = prepare_writer_output(request, output)
@@ -722,6 +793,22 @@ HOST_IDS:
             pipeline.record_attempt(settings.database, identifier, raw, audit_error)
             if not received or attempt == attempts - 1:
                 raise
+            missing = (router_missing_ids(request, output) if role == 'track_router'
+                       and (retained_router is None or merged_router) else None)
+            if missing:
+                retained_router = copy.deepcopy(output)
+            if retained_router is not None:
+                missing = router_missing_ids(request, retained_router)
+                correction = ('\nMISSING-MESSAGE PATCH: return JSON with message_assignments only for these IDs: '
+                              + encode(missing) + '. Decide their routes from the frozen dialogue. '
+                              'Do not repeat or change retained assignments. track_updates may be [] when using '
+                              'retained Tracks; provide grounded cards for newly used Tracks. '
+                              'Do not change retained Track cards.\nRetained routing JSON (read-only):\n'
+                              + encode(retained_router) + '\nLast validation error: ' + str(error))
+                prompt = base_prompt + reminder + correction
+                if len(prompt) + len(rules) > maximum:
+                    raise ValueError('Public stage prompt limit exceeded') from error
+                continue
             correction = '\nHost validation failed. Keep the original IDs and evidence; return the full corrected JSON.\n' + str(error)
             if role == 'event_curator' and 'invalid unit root' in str(error) and relaxed_content_review():
                 correction += ('\nSelect only these actual integer writable roots for owned/skip/defer: '
