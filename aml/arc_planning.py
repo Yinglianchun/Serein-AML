@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 
 from .evidence import enabled as numbered_enabled
 from .evidence import input_limit
@@ -39,6 +40,9 @@ def choose(model, query, options, evidence, menus):
 
 
 def assess(model, query, options, evidence, menus, *, allow_search=False):
+    if os.getenv('SEREIN_AML_SIMPLE_PLANNING', '0') == '1':
+        from .simple_planning import assess as simple_assess
+        return simple_assess(model, query, options, evidence, menus, allow_search=allow_search)
     empty = {"choices": [], "searches": []}
     def stop(stage):
         delivery.observe(stage, count=0)
@@ -223,6 +227,9 @@ def review(model, query, options, evidence, reads):
 
 
 def _review_batch(model, query, options, evidence, reads, *, prompt_only=False):
+    if os.getenv('SEREIN_AML_SIMPLE_PLANNING', '0') == '1':
+        from .simple_planning import review_batch
+        return review_batch(model, query, options, evidence, reads, prompt_only=prompt_only)
     if not reads:
         return {}
     use_numbers = numbered_enabled()
