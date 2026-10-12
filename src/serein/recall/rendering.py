@@ -19,6 +19,12 @@ def _arcs(reader, hits, arc_key=None):
         key = meta.get('arc_key')
         if not key:
             continue
+        if key != arc_key and hits and all(hit.get('kind') in ('event', 'scene') for hit in hits):
+            # Only relevant Arcs need their full menus (including notebook bodies).
+            targets = {value for hit in hits for value in (hit['id'], hit['kind'] + ':' + hit['id'])}
+            if not any(ref['target_id'] in targets and ref['kind'] in ('event', 'scene')
+                       for ref in reader._material_references(doc)):
+                continue
         members, offset = [], 0
         while True:
             page = reader.materials(row['id'], offset=offset, limit=100)
