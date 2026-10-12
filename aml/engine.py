@@ -37,7 +37,6 @@ from . import delivery
 
 MODEL = "gpt-4o-mini"
 _DATA_ROOT = Path(os.getenv("SEREIN_AML_DATA_DIR", "./.aml-data"))
-_RETURN_CAP = max(1, min(100, int(os.getenv("SEREIN_AML_RETURN_CAP", "40"))))
 _CONTEXT_CHAR_CAP = max(1000, int(os.getenv("SEREIN_AML_CONTEXT_CHAR_CAP", "24000")))
 _EXPAND_ARCS = os.getenv("SEREIN_AML_EXPAND_ARCS", "0") == "1"
 _PLAN_ARCS = os.getenv("SEREIN_AML_PLAN_ARCS", "0") == "1"
@@ -406,7 +405,7 @@ def _planning_evidence(prepared, query, candidates, scores, top_k, groups):
             if text.strip():
                 records[key] = {"id": key, "content": text, "score": scores[key], "title": title, "kind": hit["kind"]}
     selected = bridges.select(records, ordered, [group for group in groups if all(key in records for key in group["ids"])],
-                              min(top_k, _RETURN_CAP, 8))
+                              min(top_k, 8))
     budget = min(_CONTEXT_CHAR_CAP, 8000)
     evidence = []
     for index, record in enumerate(selected):
@@ -425,34 +424,47 @@ def _gap_candidate(services, prepared, query, searches, candidates):
     for position, plan in enumerate(searches[:2]):
         anchor = candidates.get(plan["anchor"])
         if not anchor:
+            delivery.observe('gap_anchor_missing')
             continue
         current = _planning_evidence(prepared, query, {anchor["id"]: anchor}, {anchor["id"]: 1}, 1, [])
         if not current or plan["anchor_quote"] not in current[0]["text"]:
+            delivery.observe('gap_anchor_unavailable')
             continue
         found = {}
         if prepared.embedding:
             found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="semantic"))
         found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="lexical"))
         found.update((hit["id"], hit) for hit in originals.hits(prepared, plan["query"], [plan["query"]], limit=20))
+        delivery.observe('gap_retrieved', count=len(found))
         if not any(key not in candidates and hit["kind"] in {"event", "scene", "original"}
                    and plan["entity"] in bridges.text(hit) for key, hit in found.items()):
             # Natural relation queries may have no conjunctive lexical match.
             # A bounded literal-name fallback still ranks/reviews against the gap.
             found.update((hit["id"], hit) for hit in _recall_hits(services, plan["entity"], limit=20, method="lexical"))
             found.update((hit["id"], hit) for hit in originals.hits(prepared, plan["entity"], [plan["entity"]], limit=20))
+            delivery.observe('gap_fallback_total', count=len(found))
+        delivery.observe('gap_existing', count=sum(key in candidates for key in found))
+        delivery.observe('gap_wrong_kind', count=sum(key not in candidates and hit['kind'] not in {'event', 'scene', 'original'} for key, hit in found.items()))
+        delivery.observe('gap_entity_absent', count=sum(key not in candidates and hit['kind'] in {'event', 'scene', 'original'} and plan['entity'] not in bridges.text(hit) for key, hit in found.items()))
         pool = {key: hit for key, hit in found.items() if key not in candidates and
                 hit["kind"] in {"event", "scene", "original"} and plan["entity"] in bridges.text(hit)}
         # Apply public readability, domain, revision and pending-original checks
         # before any excluded text reaches the reranker or joint reviewer.
+        eligible_count = len(pool)
         pool = {key: hit for key, hit in pool.items() if _planning_evidence(
             prepared, query, {key: hit}, {key: 1}, 1, [])}
+        delivery.observe('gap_read_guard_rejected', count=eligible_count-len(pool))
+        delivery.observe('gap_pool_budget_rejected', count=max(0, len(pool)-40))
         pool = dict(list(pool.items())[:40])
+        delivery.observe('gap_rank_input', count=len(pool))
         ranked = _rank_scores(prepared, plan["query"], pool, {key: .01 for key in pool})
         for key, hit in pool.items():
             if prepared.reranker and ranked[key] <= .00001:
+                delivery.observe('gap_rank_rejected')
                 continue
             choices.append((ranked[key], -position, key, hit, {
                 "ids": (plan["anchor"], key), "route": "planned_gap", "plan": plan}))
+    delivery.observe('gap_eligible', count=len(choices))
     if not choices:
         return None
     best = max(choices, key=lambda item: item[:3])
@@ -708,10 +720,10 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
         valid_expansions = {key for group in valid_groups for key in group['ids']}
         records = {key: record for key, record in records.items() if key in direct_ids or key in valid_expansions}
         if delivery.enabled():
-            selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP),
+            selected = bridges.select(records, ordered, valid_groups, top_k,
                                       strict=True, direct=direct_ids)
         else:
-            selected = bridges.select(records, ordered, valid_groups, min(top_k, _RETURN_CAP))
+            selected = bridges.select(records, ordered, valid_groups, top_k)
         if source_evidence.enabled() or delivery.enabled():
             # An explicit source-time history window gets coverage before ranking
             # topical excerpts. It remains bounded and labels partial coverage.
@@ -719,10 +731,10 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                 ids = list(dict.fromkeys([row['id'] for row in timed if row['id'] in records]+
                                          [row['id'] for row in selected]))
                 if delivery.enabled():
-                    selected = bridges.select(records, ids, valid_groups, min(top_k, _RETURN_CAP),
+                    selected = bridges.select(records, ids, valid_groups, top_k,
                                               strict=True, direct=direct_ids)
                 else:
-                    selected = [records[key] for key in ids[:min(top_k, _RETURN_CAP)]]
+                    selected = [records[key] for key in ids[:top_k]]
             with Reader(paths.database) as reader:
                 output = source_evidence.select(selected, reader, query, _model_json, _CONTEXT_CHAR_CAP, groups=valid_groups,
                                                 _allow_read=source_evidence.enabled(), direct=direct_ids)

@@ -110,3 +110,16 @@ def test_source_changed_after_simple_review_is_not_delivered(planned, monkeypatc
         return {'accepted': [item['selection'] for item in reads]}
     monkeypatch.setattr(engine, '_model_json', model)
     assert [row['id'] for row in search()] == ['anchor']
+
+
+@pytest.mark.parametrize('has_menu', [False, True])
+def test_menu_instructions_only_when_available(has_menu):
+    def model(prompt):
+        assert ('Index 0 is authored narrative prose' in prompt) is has_menu
+        assert ('No menu is available' in prompt) is not has_menu
+        if not has_menu:
+            assert '"picks":[0]' not in prompt
+        return {'selections': [], 'searches': []}
+    arc_planning.assess(model, 'Where?', None, [{'ref': 'a', 'text': 'Cedar moved.'}],
+                        {'story': {'title': 'History', 'materials': [{'index': 0}]}} if has_menu else {},
+                        allow_search=True)

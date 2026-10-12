@@ -18,7 +18,6 @@ def bridge_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_DATA_ROOT", tmp_path)
     monkeypatch.setattr(engine, "_EXPAND_ARCS", True)
     monkeypatch.setattr(engine, "_EXPAND_ENTITIES", False, raising=False)
-    monkeypatch.setattr(engine, "_RETURN_CAP", 40)
     monkeypatch.setattr(engine, "_rewrite_query", lambda *_: {"queries": ["Dana equipment"], "entities": []})
     monkeypatch.setattr(originals, "hits", lambda *_, **kwargs: [])
 
@@ -83,7 +82,7 @@ def test_chosen_bridge_survives_noise_and_respects_result_caps(bridge_memory):
     assert observed["menus"]
     assert "event_bridge" in observed["rerank_ids"]
     assert sum(key.startswith("event_noise_") for key in observed["rerank_ids"]) >= 40
-    assert len(rows) == 40
+    assert 40 < len(rows) <= 100
     assert {"event_anchor", "event_bridge"} <= {row["id"] for row in rows}
     assert all(set(row) == {"id", "content", "score", "created_at"} for row in rows)
 
@@ -96,7 +95,6 @@ def test_chosen_bridge_survives_noise_and_respects_result_caps(bridge_memory):
 @pytest.mark.parametrize("rule", ["excluded", "explicit_only"])
 def test_arc_pick_does_not_bypass_domain_rule(bridge_memory, monkeypatch, rule):
     paths, _ = bridge_memory
-    monkeypatch.setattr(engine, "_RETURN_CAP", 100)
     with Store(paths.database) as store:
         doc = store.read("event_bridge")
         store.revise(doc["id"], expected_revision=doc["revision"], title=doc["title"],
@@ -108,7 +106,6 @@ def test_arc_pick_does_not_bypass_domain_rule(bridge_memory, monkeypatch, rule):
 
 def test_retired_arc_material_is_not_reserved(bridge_memory, monkeypatch):
     paths, _ = bridge_memory
-    monkeypatch.setattr(engine, "_RETURN_CAP", 100)
     with Store(paths.database) as store:
         store.set_lifecycle("event_bridge", "archived")
     refresh_index(paths.database, paths.index, ["event_bridge"])
@@ -118,7 +115,6 @@ def test_retired_arc_material_is_not_reserved(bridge_memory, monkeypatch):
 @pytest.mark.parametrize("change", ["fingerprint", "revision"])
 def test_changed_arc_pick_is_not_reserved(bridge_memory, monkeypatch, change):
     paths, _ = bridge_memory
-    monkeypatch.setattr(engine, "_RETURN_CAP", 100)
     original = Services.arc_picks
 
     def changed(self, *args, **kwargs):
