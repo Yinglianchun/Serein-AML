@@ -197,13 +197,13 @@ def test_long_current_evidence_is_bounded_and_marked(planned):
     paths, _ = planned
     with Store(paths.database) as store:
         doc = store.read("anchor")
-        store.revise("anchor", expected_revision=doc["revision"], title=doc["title"], body_md="Visible text."*1000)
+        store.revise("anchor", expected_revision=doc["revision"], title=doc["title"], body_md="Visible text."*2000)
         doc = store.read("anchor")
     from serein.configured_models import effective_settings
     from serein.config import Settings
     rows = engine._planning_evidence(effective_settings(Settings(paths.database, paths.index)), "Lin Vale", {
         "anchor": {"id": "anchor", "kind": "event", "document": doc}}, {"anchor": 1}, 4, [])
-    assert len(rows[0]["text"]) <= 8000 and rows[0]["truncated"]
+    assert len(rows[0]["text"]) <= 16000 and rows[0]["truncated"]
     stale = {**doc, "revision": doc["revision"]-1}
     assert engine._planning_evidence(effective_settings(Settings(paths.database, paths.index)), "Lin Vale", {
         "anchor": {"id": "anchor", "kind": "event", "document": stale}}, {"anchor": 1}, 4, []) == []

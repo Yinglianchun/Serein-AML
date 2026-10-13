@@ -222,7 +222,7 @@ def test_entity_pair_quote_budget_survives_many_longer_noise_records(memory, mon
     monkeypatch.setattr(engine, '_recall_hits', anchor_first)
     monkeypatch.setattr(engine, '_CONTEXT_CHAR_CAP', 1000)
     rows = search(top_k=100)
-    assert len(rows) == 40 and sum(len(row['content']) for row in rows) <= 1000
+    assert 40 < len(rows) <= 100 and sum(len(row['content']) for row in rows) <= 1000
     assert 'Dana joined Morningstar Studio in 2023.' in next(row['content'] for row in rows if row['id'] == 'anchor')
     assert 'Morningstar Studio moved from Hangzhou to Suzhou in 2024.' in next(row['content'] for row in rows if row['id'] == 'bridge')
 

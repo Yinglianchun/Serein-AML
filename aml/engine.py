@@ -406,7 +406,7 @@ def _planning_evidence(prepared, query, candidates, scores, top_k, groups):
                 records[key] = {"id": key, "content": text, "score": scores[key], "title": title, "kind": hit["kind"]}
     selected = bridges.select(records, ordered, [group for group in groups if all(key in records for key in group["ids"])],
                               min(top_k, 8))
-    budget = min(_CONTEXT_CHAR_CAP, 8000)
+    budget = min(_CONTEXT_CHAR_CAP, 16000)
     evidence = []
     for index, record in enumerate(selected):
         allowance = min(len(record["content"]), budget // (len(selected)-index))
@@ -418,9 +418,10 @@ def _planning_evidence(prepared, query, candidates, scores, top_k, groups):
     return evidence
 
 
-def _gap_candidate(services, prepared, query, searches, candidates):
+def _gap_candidate(services, prepared, query, searches, candidates, *, visible=None, already_read=()):
     """Retrieve once from grounded plans; propose at most one joint-review candidate."""
     choices = []
+    fully_seen = {row['ref'] for row in (visible or []) if not row.get('truncated', False)}
     for position, plan in enumerate(searches[:2]):
         anchor = candidates.get(plan["anchor"])
         if not anchor:
@@ -430,14 +431,30 @@ def _gap_candidate(services, prepared, query, searches, candidates):
         if not current or plan["anchor_quote"] not in current[0]["text"]:
             delivery.observe('gap_anchor_unavailable')
             continue
+        def eligible_hit(key, hit):
+            if hit['kind'] not in {'event', 'scene', 'original'}:
+                return False
+            if key == plan['anchor'] or key in already_read:
+                return False
+            if key in candidates:
+                if visible is None or key in fully_seen:
+                    return False
+                old = candidates[key]
+                if old['kind'] != hit['kind']:
+                    return False
+                if hit['kind'] == 'original':
+                    if old.get('content') != hit.get('content'):
+                        return False
+                elif old['document']['revision'] != hit['document']['revision']:
+                    return False
+            return hit['kind'] in {'event', 'scene', 'original'} and plan['entity'] in bridges.text(hit)
         found = {}
         if prepared.embedding:
             found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="semantic"))
         found.update((hit["id"], hit) for hit in _recall_hits(services, plan["query"], limit=20, method="lexical"))
         found.update((hit["id"], hit) for hit in originals.hits(prepared, plan["query"], [plan["query"]], limit=20))
         delivery.observe('gap_retrieved', count=len(found))
-        if not any(key not in candidates and hit["kind"] in {"event", "scene", "original"}
-                   and plan["entity"] in bridges.text(hit) for key, hit in found.items()):
+        if not any(eligible_hit(key, hit) for key, hit in found.items()):
             # Natural relation queries may have no conjunctive lexical match.
             # A bounded literal-name fallback still ranks/reviews against the gap.
             found.update((hit["id"], hit) for hit in _recall_hits(services, plan["entity"], limit=20, method="lexical"))
@@ -446,8 +463,8 @@ def _gap_candidate(services, prepared, query, searches, candidates):
         delivery.observe('gap_existing', count=sum(key in candidates for key in found))
         delivery.observe('gap_wrong_kind', count=sum(key not in candidates and hit['kind'] not in {'event', 'scene', 'original'} for key, hit in found.items()))
         delivery.observe('gap_entity_absent', count=sum(key not in candidates and hit['kind'] in {'event', 'scene', 'original'} and plan['entity'] not in bridges.text(hit) for key, hit in found.items()))
-        pool = {key: hit for key, hit in found.items() if key not in candidates and
-                hit["kind"] in {"event", "scene", "original"} and plan["entity"] in bridges.text(hit)}
+        pool = {key: hit for key, hit in found.items() if eligible_hit(key, hit)}
+        delivery.observe('gap_existing_unseen', count=sum(key in candidates for key in pool))
         # Apply public readability, domain, revision and pending-original checks
         # before any excluded text reaches the reranker or joint reviewer.
         eligible_count = len(pool)
@@ -529,6 +546,15 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
         if (_EXPAND_ARCS or _EXPAND_GAPS) and candidates:
             # An expansion is never a seed for another expansion in this Search.
             seeds = arc_seeds
+            coverage = os.getenv('SEREIN_AML_PLANNING_COVERAGE', '0') == '1' and (_PLAN_ARCS or _EXPAND_GAPS)
+            if coverage:
+                protected = {key for group in evidence_groups for key in group['ids']}
+                ids = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
+                ids = list(dict.fromkeys([*ids, *sorted(protected)]))
+                pool = {key: candidates[key] for key in ids}
+                planning_scores = _rank_scores(prepared, query, pool, {key: scores[key] for key in ids})
+                seeds = [key for key in sorted(planning_scores, key=lambda key: (-planning_scores[key], key))
+                         if candidates[key]['kind'] in {'event', 'scene'}][:8]
             with Reader(paths.database) as reader:
                 by_owner, menus = _arcs(reader, [candidates[item] for item in seeds if candidates[item]['kind'] != 'original']) if _EXPAND_ARCS else ({}, {})
                 anchors = {key: next(owner for owner in seeds if any(card['arc_key'] == key
@@ -539,6 +565,8 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                     metadata = (volume.get("document") or {}).get("metadata", {})
                     if metadata.get("legacy_registry", metadata).get("publication_status") == "collecting":
                         menu["materials"] = [item for item in menu["materials"] if item["index"] != 0]
+            if coverage:
+                menus = dict(sorted(menus.items(), key=lambda item: (seeds.index(anchors[item[0]]), item[0])))
             menus = dict(list(menus.items())[:3])
             delivery.observe('arc_menus', count=len(menus))
             delivery.observe('arc_menu_items', count=sum(len(m['materials']) for m in menus.values()))
@@ -547,11 +575,12 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                 gap_searches = []
                 planning = _PLAN_ARCS or _EXPAND_GAPS
                 if planning:
-                    protected = {key for group in evidence_groups for key in group["ids"]}
-                    ids = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
-                    ids = list(dict.fromkeys([*ids, *sorted(protected)]))
-                    pool = {key: candidates[key] for key in ids}
-                    planning_scores = _rank_scores(prepared, query, pool, {key: scores[key] for key in ids})
+                    if not coverage:
+                        protected = {key for group in evidence_groups for key in group["ids"]}
+                        ids = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
+                        ids = list(dict.fromkeys([*ids, *sorted(protected)]))
+                        pool = {key: candidates[key] for key in ids}
+                        planning_scores = _rank_scores(prepared, query, pool, {key: scores[key] for key in ids})
                     evidence = _planning_evidence(prepared, query, pool, planning_scores, top_k, evidence_groups)
                     try:
                         if _EXPAND_GAPS:
@@ -589,7 +618,8 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                             add_ranked([hit], 1.0)
                             evidence_groups.append(group)
                 if gap_searches:
-                    candidate = _gap_candidate(services, prepared, query, gap_searches, candidates)
+                    extra = {'visible': evidence, 'already_read': {item['hit']['id'] for item in pending_reads}} if coverage else {}
+                    candidate = _gap_candidate(services, prepared, query, gap_searches, candidates, **extra)
                     delivery.observe('arc_gap_candidates', count=int(candidate is not None))
                     if candidate:
                         pending_reads.append(candidate)
