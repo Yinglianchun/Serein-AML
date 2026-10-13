@@ -87,6 +87,25 @@ def test_lite_writer_keeps_append_budget_and_context_requests(monkeypatch):
     assert runtime.writer_payload(request) == (request['rules'], request['prompt'])
 
 
+def test_light_writer_removes_processing_date_but_keeps_source_dates(monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    monkeypatch.setenv('SEREIN_AML_RELAX_CONTENT_REVIEW', '1')
+    rows = [{'speaker': '她', 'evidence_role': 'owned', 'message_time_origin': 'source',
+             'created_at': '2026-05-15T12:00:00Z', 'text': '今天2026年5月15日负责人变为林澈。'}]
+    block = json.dumps(rows, ensure_ascii=False)
+    request = {'role': 'event_writer', 'identity': {}, 'rules': 'strict',
+               'prompt': '[memory_phase: sol_event_writer]\n日期：2026-10-13（Asia/Shanghai）\n无预设标题\n'
+                         '<event_reading_block_json>\n' + block + '\n</event_reading_block_json>\nRemaining: 17'}
+    rules, prompt = runtime.writer_payload(request)
+    assert '2026-10-13' not in prompt
+    assert '2026-05-15T12:00:00Z' in prompt and rows[0]['text'] in prompt
+    assert 'Remaining: 17' in prompt
+    assert 'Lightly edit' in rules and 'exact date unknown' in rules
+    assert 'Keep each date attached to its event or effective change' in rules
+    request['transcription_only'] = True
+    assert runtime.writer_payload(request) == (request['rules'], request['prompt'])
+
+
 def test_lite_discards_invalid_optional_event_citations_without_certifying_them(monkeypatch):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     from serein.extensions.pipeline_latest import validate_event_writer_result
