@@ -115,3 +115,54 @@ def test_menu_seed_uses_reranking(planned, monkeypatch, enabled):
     monkeypatch.setattr(engine, '_model_json', model)
     search(top_k=100)
     assert bool(seen) == enabled
+
+
+@pytest.mark.parametrize('top_k', [2, 100])
+@pytest.mark.parametrize('preference', [
+    'Lin Vale prefers unsweetened tea, not sweet drinks.',
+    'On May 3 Lin Vale replaced sweet coffee with unsweetened tea as their preference.',
+    'Lin Vale is a programmer who prefers acoustic music, not electronic music.',
+])
+def test_existing_gap_reread_keeps_direct_preference_priority(gap_memory, monkeypatch, top_k, preference):
+    paths, observed = gap_memory
+    monkeypatch.setenv('SEREIN_AML_PLANNING_COVERAGE', '1')
+    with Store(paths.database) as store:
+        store.create('preference', 'event', 'Explicit preference', preference, manual_surface=True)
+        for i in range(6):
+            store.create(f'filler{i}', 'event', 'Other detail', 'Unrelated detail.', manual_surface=True)
+        hits = {key: {'id': key, 'kind': 'event', 'document': store.read(key)} for key in
+                ['preference', 'anchor', *[f'filler{i}' for i in range(6)], 'bridge']}
+    monkeypatch.setattr(engine, '_recall_hits', lambda s, q, **kw:
+                        list(hits.values()) if q == 'Lin Vale' else [hits['bridge']])
+    monkeypatch.setattr(engine, '_rank_scores', lambda p, q, pool, scores: {
+        key: (1 if key == 'preference' else .8 if key == 'anchor' else .001 if key == 'bridge' else .4)
+        for key in pool})
+    def model(prompt):
+        observed['prompts'].append(prompt)
+        return reviewer(prompt) if 'READS:\n' in prompt else decision()
+    monkeypatch.setattr(engine, '_model_json', model)
+    rows = search(top_k=top_k)
+    assert [row['id'] for row in rows[:2]] == ['preference', 'anchor']
+    assert rows[0]['content'] == preference
+    assert len(rows) == (2 if top_k == 2 else 9)
+    assert sum('READS:\n' in p for p in observed['prompts']) == 1
+    if top_k == 100:
+        assert rows[-1]['id'] == 'bridge'
+
+
+def test_reread_without_reservation_does_not_break_new_relation_retention():
+    from aml import bridges
+    records = {key: {'id': key} for key in ['preference', 'anchor', 'bridge', 'new']}
+    reread = {'ids': ('anchor', 'bridge'), 'route': 'planned_gap', 'reserve': False}
+    new = {'ids': ('anchor', 'new'), 'route': 'planned_gap'}
+    assert [r['id'] for r in bridges.select(records, list(records), [reread], 2)] == ['preference', 'anchor']
+    assert [r['id'] for r in bridges.select(records, list(records), [reread, new], 2)] == ['anchor', 'new']
+
+
+def test_existing_gap_does_not_preempt_direct_excerpt_budget():
+    from aml import delivery
+    rows = [{'id': key, 'content': 'abc'} for key in ['preference', 'anchor', 'bridge']]
+    group = {'ids': ('anchor', 'bridge'), 'route': 'planned_gap', 'reserve': False}
+    assert [r['id'] for r in delivery.allocate(rows, [group], set(r['id'] for r in rows), 6)] == ['preference', 'anchor']
+    group.pop('reserve')
+    assert [r['id'] for r in delivery.allocate(rows, [group], set(r['id'] for r in rows), 6)] == ['anchor', 'bridge']

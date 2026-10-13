@@ -151,6 +151,8 @@ def select(records, ordered, groups, limit, *, strict=False, direct=()):
             delivery.observe('group', key, reason='TOP_K_GROUP')
     if limit >= 2:
         for group in sorted(groups, key=lambda row: row['route'] != 'arc_menu'):
+            if not group.get('reserve', True):
+                continue
             ids = list(dict.fromkeys(group['ids']))
             if not all(key in records for key in ids):
                 continue

@@ -674,10 +674,14 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
                                 for key in ("anchor_quote", "quote")):
                             continue
                         group["focus"] = {group["ids"][0]: [support["anchor_quote"]], group["ids"][1]: [support["quote"]]}
-                        add_ranked([item["hit"]], 1.0)
+                        if group['route'] == 'planned_gap' and item['hit']['id'] in direct_ids:
+                            # Reading an existing hit supplies context, not extra relevance.
+                            group['reserve'] = False
+                        else:
+                            add_ranked([item["hit"]], 1.0)
                         evidence_groups.append(group)
 
-        protected = {key for group in evidence_groups for key in group['ids']}
+        protected = {key for group in evidence_groups if group.get('reserve', True) for key in group['ids']}
         kept = sorted(scores, key=lambda key: (-scores[key], key))[:100-len(protected)]
         kept = list(dict.fromkeys([*kept, *sorted(protected)]))
         scores = {key: scores[key] for key in kept}
@@ -805,6 +809,8 @@ def _search_memory(*, query: str, options: list[str] | None, user_id: str, top_k
         budget = _CONTEXT_CHAR_CAP
         allowances: dict[str, int] = {item['id']: 0 for item in selected}
         for group in valid_groups:
+            if not group.get('reserve', True):
+                continue
             if not all(key in allowances for key in group['ids']):
                 continue
             minimums = {key: len(quotes[0]) for key, quotes in group.get('focus', {}).items()

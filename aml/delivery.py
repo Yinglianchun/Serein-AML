@@ -115,6 +115,8 @@ def allocate(rows, groups, direct, cap, carriers=None):
     if carriers is None:
         carriers = {key: {key} for key in by_id}
     for group in sorted(groups, key=lambda item: item.get('route') != 'arc_menu'):
+        if not group.get('reserve', True):
+            continue
         ids = group_targets(group, carriers)
         if not ids or not ids <= by_id.keys():
             for key in group['ids']:

@@ -10,9 +10,13 @@ excerpt. With this switch enabled, such a candidate can enter the existing
 joint review once. A fully shown candidate, the anchor itself, or a material
 already scheduled through an Arc menu cannot enter this reread path. Revisions,
 pending-original content, readability and domain restrictions remain checked.
-Accepted material uses the existing relation-group retention mechanism and is
-not duplicated in the response. Rejection does not remove its independent
-direct-retrieval eligibility.
+Accepted existing gap candidates keep their original retrieval ranking: rereading
+does not add a score bonus, reserve candidate/result slots, or move the pair to
+the front. Joint-review focus and source validation remain available when the
+materials fit the result. Rejection does not remove independent direct-retrieval
+eligibility. Newly found gap material still uses relation-group retention.
+When top_k cannot hold both existing endpoints and higher-ranked direct evidence,
+the original ranking wins; this reread does not promise both endpoints will fit.
 
 Arc menus are seeded from the top eight canonical candidates after reranking,
 instead of the first six candidates before reranking. Menus are ordered by
