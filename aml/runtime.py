@@ -350,7 +350,7 @@ def router_track_choices(request):
     return choices
 
 
-def prepare_router_output(request, output):
+def prepare_router_output(request, output, *, fill_track_updates=True):
     """Canonicalize declared routes and carry omitted frozen cards, never new links."""
     if (not simplified_authoring() or request['role'] != 'track_router'
             or not isinstance(output, dict) or not isinstance(output.get('message_assignments'), list)):
@@ -406,7 +406,7 @@ def prepare_router_output(request, output):
                 # its redundant discriminator; the host adds no reference/owner.
                 row['routing_role'] = 'bridge'
             used.extend([row['primary_track_ref'], *refs])
-    if isinstance(updates, list):
+    if isinstance(updates, list) and fill_track_updates:
         for ref in dict.fromkeys(ref for ref in used if isinstance(ref, str)):
             card = cards.get(ref)
             if ref in updated or card is None or not all(key in card for key in ('subject', 'throughline', 'status')):
@@ -783,7 +783,10 @@ HOST_IDS:
             raw = response['choices'][0]['message']['content']
             output = pipeline.prepare_stage_output(request, stage_json(raw, role))
             router_original = output
-            output = prepare_router_output(request, output)
+            # A missing-message patch merges with retained, already validated
+            # cards. Carrying older request cards here would overwrite that state.
+            output = prepare_router_output(request, output,
+                                           fill_track_updates=retained_router is None)
             if retained_router is not None:
                 output = merge_router_patch(request, retained_router, output)
                 merged_router = True

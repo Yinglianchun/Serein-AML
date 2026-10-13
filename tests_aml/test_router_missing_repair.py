@@ -74,11 +74,48 @@ def test_multiple_partial_patches_accumulate_without_guessing(monkeypatch):
     assert final == output
 
 
+def test_missing_patch_does_not_reintroduce_stale_frozen_card(monkeypatch):
+    monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
+    request, output = packet()
+    card = output['track_updates'][0]
+    card['track_ref'] = 'track-existing'
+    for row in output['message_assignments']:
+        row['primary_track_ref'] = 'track-existing'
+    request['active_tracks'] = [{'track_id': 'track-existing',
+        **{k: v for k, v in card.items() if k != 'track_ref'}}]
+    retained = copy.deepcopy(output)
+    retained['message_assignments'] = retained['message_assignments'][::2]
+    retained['track_updates'][0]['throughline'] = 'Updated stage'
+    retained['track_updates'][0]['status'] = 'parked'
+    patch = {'message_assignments': [output['message_assignments'][1]], 'track_updates': []}
+    stale = runtime.prepare_router_output(request, patch)
+    with pytest.raises(ValueError, match='cannot change retained'):
+        runtime.merge_router_patch(request, retained, stale)
+    prepared = runtime.prepare_router_output(request, patch, fill_track_updates=False)
+    merged = runtime.merge_router_patch(request, retained, prepared)
+    assert prepared['track_updates'] == []
+    assert merged['track_updates'] == retained['track_updates']
+    assert merged['message_assignments'] == output['message_assignments']
+    explicit_change = copy.deepcopy(stale)
+    with pytest.raises(ValueError, match='cannot change retained'):
+        runtime.merge_router_patch(request, retained,
+            runtime.prepare_router_output(request, explicit_change, fill_track_updates=False))
+
+
 @pytest.mark.parametrize('bad_patch', [False, True])
 def test_run_stage_targeted_patch_keeps_literal_attempts(memory, monkeypatch, bad_patch):
     monkeypatch.setenv('SEREIN_AML_SIMPLIFY_AUTHORING', '1')
     monkeypatch.setattr(pipeline, 'advance', pipeline.advance.original)
     calls = []
+    normalization_modes = []
+    prepare = runtime.prepare_router_output
+
+    def observe_prepare(request, output, **kwargs):
+        if request['role'] == 'track_router':
+            normalization_modes.append(kwargs.get('fill_track_updates', True))
+        return prepare(request, output, **kwargs)
+
+    monkeypatch.setattr(runtime, 'prepare_router_output', observe_prepare)
 
     async def complete(model, payload, **kwargs):
         with Store(engine._paths('user-a').database, read_only=True) as store:
@@ -102,6 +139,7 @@ def test_run_stage_targeted_patch_keeps_literal_attempts(memory, monkeypatch, ba
     monkeypatch.setattr('serein.model_runtime.complete', complete)
     receipt = add()
     assert len(calls) == (3 if bad_patch else 2)
+    assert normalization_modes[0] is True and False in normalization_modes
     assert add() == receipt
     with Store(engine._paths('user-a').database, read_only=True) as store:
         attempts = store.conn.execute("SELECT output_text,error FROM pipeline_attempts WHERE output_text!='' ORDER BY rowid").fetchall()
