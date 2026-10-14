@@ -22,6 +22,8 @@ def test_writer_length_feedback_and_model_rewrite(memory, monkeypatch):
         if request['role'] == 'event_writer':
             rules, prompt = [row['content'] for row in payload['messages']]
             assert 'when unrelated to this Event' in rules
+            assert 'Remove only repeated wording; do not omit distinct events' in rules
+            assert 'Keep only key technical points and necessary steps' not in rules
             assert 'Explicit preferences and constraints on how to use them are essential facts' in rules
             assert 'retain whose preference it is, exclusions, exceptions and changes' in rules
             assert 'record the constraint as a fact, not an instruction to the reader' in rules
@@ -33,6 +35,7 @@ def test_writer_length_feedback_and_model_rewrite(memory, monkeypatch):
                 assert 'usually within 500 characters' in prompt
                 assert 'allowed maximum is 1500' not in prompt
                 assert 'Keep only key technical points and necessary steps' not in prompt
+                assert 'Remove only repeated wording; do not omit distinct events' in prompt
                 assert 'never mechanically truncate' in prompt
                 assert 'Explicit preferences and constraints on how to use them are essential facts' in prompt
                 assert 'based on occupation' in prompt
