@@ -32,7 +32,7 @@ def test_writer_length_feedback_and_model_rewrite(memory, monkeypatch):
                 assert 'Current body: 1697 characters.' in prompt
                 assert 'usually within 500 characters' in prompt
                 assert 'allowed maximum is 1500' not in prompt
-                assert 'Keep only key technical points and necessary steps' in prompt
+                assert 'Keep only key technical points and necessary steps' not in prompt
                 assert 'never mechanically truncate' in prompt
                 assert 'Explicit preferences and constraints on how to use them are essential facts' in prompt
                 assert 'based on occupation' in prompt

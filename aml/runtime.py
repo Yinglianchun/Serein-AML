@@ -24,7 +24,7 @@ ACTIVE_DATABASE = ContextVar("aml_database", default=None)
 GENERATIVE_ROLES = ("track_router", "event_curator", "event_writer", "writer", "narrative_scout", "operit_tagging")
 WRITER_COMPRESSION_RULES = """Merge repeated descriptions. Omit meal, sleep and other daily-life asides
 when unrelated to this Event; retain them when they are the subject or necessary
-evidence. Keep only key technical points and necessary steps, not every detail.
+evidence.
 Preserve subjects, relationships, dates, state changes and necessary intermediate
 events. Explicit preferences and constraints on how to use them are essential facts,
 not asides: retain whose preference it is, exclusions, exceptions and changes.
