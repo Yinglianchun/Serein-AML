@@ -70,8 +70,9 @@ earlier message in the SAME Track is not a bridge. Do not invent a second Track.
 
 Return the supplied JSON shape. Every raw message, including assistant replies,
 needs one assignment in input order. Use the supplied T-labels for existing Tracks. Recent
-context is read-only: do not assign it. For track_updates, include new Tracks and
-existing cards you actually change; unchanged existing cards are carried by host.
+context is read-only: do not assign it. For track_updates, include complete new
+Tracks. For existing Tracks, return track_ref and only fields you change; omitted
+fields inherit the supplied card. Unchanged existing cards are carried by host.
 Only update used Tracks. subject identifies the concrete activity (1..160 chars);
 throughline is a short continuation cue: concrete goal, current stage and next
 unresolved step. Aim for 300 characters; maximum 600 characters. Replace the
@@ -351,7 +352,7 @@ def router_track_choices(request):
 
 
 def prepare_router_output(request, output, *, fill_track_updates=True):
-    """Canonicalize declared routes and carry omitted frozen cards, never new links."""
+    """Canonicalize declared routes and inherit omitted card fields, never new links."""
     if (not simplified_authoring() or request['role'] != 'track_router'
             or not isinstance(output, dict) or not isinstance(output.get('message_assignments'), list)):
         return output
@@ -385,6 +386,11 @@ def prepare_router_output(request, output, *, fill_track_updates=True):
         for row in updates:
             if isinstance(row, dict) and 'track_ref' in row:
                 row['track_ref'] = exact_ref(row['track_ref'])
+                if (fill_track_updates and isinstance(row['track_ref'], str)
+                        and (card := cards.get(row['track_ref'])) is not None):
+                    for key in ('subject', 'throughline', 'event_policy', 'status'):
+                        if key not in row and key in card:
+                            row[key] = card[key]
     updated = {row['track_ref'] for row in updates
                if isinstance(row, dict) and isinstance(row.get('track_ref'), str)} if isinstance(updates, list) else set()
     declared = set(cards) | {ref for ref in updated if re.fullmatch(r'new:[1-9][0-9]*', ref)}
@@ -474,7 +480,9 @@ def merge_router_patch(request, retained, patch):
             raise ValueError('Track Router patch has invalid or repeated Track update')
         seen.add(ref)
         if ref in cards:
-            if row != cards[ref]:
+            # Missing fields inherit the accepted card, not the older request
+            # card. Explicit changes remain invalid during a missing-row patch.
+            if {**cards[ref], **row} != cards[ref]:
                 raise ValueError('Track Router patch cannot change retained Track cards')
         else:
             merged['track_updates'].append(copy.deepcopy(row))
